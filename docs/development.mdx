@@ -1,0 +1,80 @@
+---
+title: 开发指南
+description: 本地运行、项目结构、命令与开发约定。
+---
+
+# 开发指南
+
+## 环境要求
+
+- Node.js ≥ 22.12
+- pnpm
+
+```bash
+pnpm install
+pnpm dev
+```
+
+`pnpm dev` 会先构建一次前端，然后同时启动：
+
+- 文档站点：`http://localhost:4321/`
+- Demo 时间轴：`http://localhost:4321/timeline/`
+
+修改 `web/src/` 下的文件会自动重新构建，刷新页面即可看到效果。
+
+## 项目结构
+
+```text
+TimeLines/
+├── docs/                      # 文档内容（Markdown / MDX）
+├── web/                       # 时间线前端（Vue + Vite）
+│   ├── index.html             # Vite 入口
+│   ├── vite.config.ts         # base=/timeline/，输出到 _build/
+│   ├── tsconfig.json
+│   └── src/
+│       ├── main.ts
+│       ├── App.vue            # 页面骨架、滚动进度、年份跳转
+│       ├── components/
+│       │   ├── TimelineStage.vue  # 时间轴布局与交互
+│       │   └── EventBubble.vue    # 单个事件气泡
+│       ├── data/events.ts     # demo 数据集（英国 × 美国）
+│       ├── lib/timeline.ts    # 比例、刻度、避让算法
+│       ├── styles/main.css
+│       └── types.ts
+├── .dev/                      # 开发与构建脚本
+├── blume.config.ts            # 文档站点配置
+├── _build/                    # 前端构建产物（可删）
+├── _dist/                     # 站点构建产物（可删）
+├── .blume/                    # Blume 运行时（可删）
+└── package.json               # 统一命令入口
+```
+
+前端构建产物输出到 `_build/`：开发时由 Blume 直接以 `/timeline/` 提供；`pnpm build` 时先由 Blume 生成站点，再整理为 `_dist/`，前端页面位于 `_dist/timeline/`。
+
+## 常用命令
+
+| 命令 | 说明 |
+| --- | --- |
+| `pnpm dev` | 构建前端并同时预览文档与 demo |
+| `pnpm dev:web` | 只启动 Vite 开发服务器（带 HMR，`http://localhost:5173/timeline/`） |
+| `pnpm dev:docs` | 构建前端后只启动文档站点 |
+| `pnpm build` | 构建前端并生成静态站点到 `_dist/` |
+| `pnpm clean` | 删除 `_build/`、`_dist/`、`.blume/` 等产物（`--all` 连同 `node_modules/`） |
+| `pnpm preview` | 预览上一次构建结果 |
+| `pnpm typecheck` | 使用 `vue-tsc` 做类型检查 |
+| `pnpm doctor` | 检查文档配置与内容问题 |
+
+## 目录命名约定
+
+- 可删除的构建产物以 `_` 开头：`_build/`、`_dist/`。
+- 需要提交的开发配置以 `.` 开头：`.dev/`、`.gitignore`。
+- `.blume/` 是唯一例外——`blume dev` 硬编码使用 `<root>/.blume`，无法改名，因此保留点号前缀，它同样可以随时删除。
+
+## 开发约定
+
+- 前端源码只改 `web/src/`；`_build/`、`_dist/` 是构建产物，不要直接编辑。
+- demo 数据集中在 `web/src/data/events.ts`，与渲染逻辑分离，便于后续替换为真实时间线数据。
+- 布局常量与避让算法在 `web/src/lib/timeline.ts`，通用化时应从这里抽出泳道与年份区间配置。
+- 新增文档放在 `docs/` 中，Blume 会根据文件树自动生成路由与侧边栏。
+- 构建产物为 `_dist/`，已包含 `/timeline/`，可作为一个静态站点整体部署。
+- 需要清理环境时用 `pnpm clean`；开发服务器运行中会被拒绝，确认无影响后可加 `--force`。

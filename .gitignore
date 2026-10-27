@@ -1,0 +1,8 @@
+node_modules/
+
+# Blume 运行时（框架硬编码 <root>/.blume，无法改名）
+.blume/
+
+# 可删除的构建产物
+_build/
+_dist/

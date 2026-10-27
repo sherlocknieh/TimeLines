@@ -1,0 +1,26 @@
+{
+  "name": "timelines",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node .dev/dev.mjs",
+    "dev:web": "vite --config web/vite.config.ts",
+    "dev:docs": "node .dev/dev.mjs --docs-only",
+    "build": "node .dev/build.mjs",
+    "clean": "node .dev/clean.mjs",
+    "preview": "node .dev/preview.mjs",
+    "typecheck": "vue-tsc --noEmit -p web/tsconfig.json",
+    "doctor": "blume doctor"
+  },
+  "dependencies": {
+    "blume": "^1.6.4",
+    "vue": "^3.5.44"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@vitejs/plugin-vue": "^6.0.10",
+    "typescript": "~5.9.3",
+    "vite": "^8.3.5",
+    "vue-tsc": "^3.3.13"
+  }
+}
