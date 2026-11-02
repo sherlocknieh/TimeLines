@@ -213,7 +213,8 @@ body {
   touch-action: none;
   user-select: none;
 }
-.axis.is-dragging { cursor: grabbing; }
+.axis.is-dragging,
+.axis.is-dragging .axis__band { cursor: grabbing; }
 
 .axis__spine {
   position: absolute;
@@ -238,7 +239,7 @@ body {
   bottom: 0;
   width: 64px;
   z-index: 5;
-  cursor: ew-resize;
+  cursor: zoom-in;
 }
 
 .axis__tick {
