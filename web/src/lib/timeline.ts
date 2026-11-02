@@ -1,30 +1,5 @@
-export const START = 1200;
-export const END = 2030;
-/** 每年对应的像素高度 */
-export const K = 3.2;
-export const TOP_PAD = 22;
-export const BOTTOM_PAD = 60;
-/** 轴线到气泡的距离（与 CSS --gap 保持一致） */
-export const GAP = 22;
 /** 气泡之间的最小垂直间距 */
-export const VGAP = 9;
-
-export const yOf = (year: number): number => TOP_PAD + (year - START) * K;
-
-export const axisHeight = (END - START) * K;
-export const baseStageHeight = TOP_PAD + axisHeight + BOTTOM_PAD;
-
-export const JUMP_YEARS = [1215, 1588, 1776, 1861, 1914, 1945, 2001] as const;
-
-export const TICKS: number[] = [];
-for (let year = START + 25; year < END; year += 25) {
-  if (year % 100 !== 0) TICKS.push(yOf(year));
-}
-
-export const GRID_YEARS: number[] = [];
-for (let year = START; year <= 2000; year += 100) {
-  GRID_YEARS.push(year);
-}
+const VGAP = 9;
 
 export interface AnchorBox {
   anchor: number;
@@ -56,7 +31,6 @@ export function avoidOverlap(items: readonly AnchorBox[]): number[] {
 
     let top = (first + last) / 2 - total / 2;
     if (top < prevBottom + VGAP) top = prevBottom + VGAP;
-    if (top < 0) top = 0;
 
     let y = top;
     for (const index of cluster) {

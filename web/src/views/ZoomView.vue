@@ -74,17 +74,20 @@ const events: AxisEvent[] = EVENTS.map((event, id) => ({
 }));
 
 const eventDays = events.map((event) => event.day);
-/** 数据范围两端留白；最近一端始终包含今天，便于观察「今天」标记 */
+/** 数据范围：历史端留一点余量，未来端止于今天 */
 const DATA_MIN = Math.min(...eventDays) - Math.round(YEAR_DAYS * 3);
-const DATA_MAX = Math.max(Math.max(...eventDays), todayDay) + Math.round(YEAR_DAYS * 2);
+const DATA_MAX = Math.max(...eventDays, todayDay);
+/** 今天之后只留少量可平移空间，避免空白的未来占掉太多画布 */
+const FUTURE_PAD = Math.round(YEAR_DAYS * 2);
 /** 允许平移/缩放的硬边界，避免对数坐标算出无法表示的日期 */
 const SAFE_MIN = DATA_MIN - Math.round(YEAR_DAYS * 2500);
-const SAFE_MAX = todayDay + Math.round(YEAR_DAYS * 2500);
+const SAFE_MAX = DATA_MAX + FUTURE_PAD;
 
 const viewport = ref<HTMLElement | null>(null);
 const width = ref(1100);
 const height = ref(560);
 const scale = ref<ScaleMode>("linear");
+const reversed = ref(false);
 const unit = ref<Unit>("year");
 const center = ref(0);
 const span = ref(1);
@@ -96,6 +99,9 @@ const dragging = ref(false);
 const axisMargin = computed(() => Math.min(180, Math.max(110, width.value * 0.26)));
 
 const unitDays = computed(() => UNIT_DAYS[unit.value]);
+
+/** 屏幕方向：+1 历史在上、今天在下；-1 今天在上、历史向下 */
+const dir = computed(() => (reversed.value ? -1 : 1));
 
 /** 对数模式下以「今天」为原点做有符号对数压缩；线性模式直接用日序号 */
 function pOf(day: number): number {
@@ -114,12 +120,12 @@ const plotHeight = computed(() => Math.max(1, height.value - PLOT_PAD * 2));
 
 const yOfP = (position: number) =>
   PLOT_PAD +
-  ((position - center.value + span.value / 2) / span.value) * plotHeight.value;
+  ((dir.value * (position - center.value) + span.value / 2) / span.value) *
+    plotHeight.value;
 
 const pOfY = (y: number) =>
-  center.value -
-  span.value / 2 +
-  ((y - PLOT_PAD) / plotHeight.value) * span.value;
+  center.value +
+  dir.value * (((y - PLOT_PAD) / plotHeight.value - 0.5) * span.value);
 
 const yOfDay = (day: number) => yOfP(pOf(day));
 const dayOfY = (y: number) => fromP(pOfY(y));
@@ -193,7 +199,7 @@ function zoomAt(factor: number, y: number) {
   const anchor = pOfY(y);
   const next = clamp(span.value / factor, minSpan.value, maxSpan.value);
   const ratio = (y - PLOT_PAD) / plotHeight.value;
-  center.value = anchor + (0.5 - ratio) * next;
+  center.value = anchor + dir.value * (0.5 - ratio) * next;
   span.value = next;
   clampView();
 }
@@ -208,6 +214,15 @@ function onAxisWheel(event: WheelEvent) {
     Math.max(PLOT_PAD, height.value - PLOT_PAD),
   );
   zoomAt(Math.exp(-event.deltaY * 0.002), y);
+}
+
+/** 轴线热区之外：滚轮平移时间 */
+function onCanvasWheel(event: WheelEvent) {
+  const scaleBy =
+    event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? plotHeight.value : 1;
+  center.value +=
+    dir.value * ((event.deltaY * scaleBy) / plotHeight.value) * span.value;
+  clampView();
 }
 
 function centerOn(day: number) {
@@ -241,7 +256,8 @@ function onPointerMove(event: PointerEvent) {
     axisX.value = drag.axisX + dx;
     clampAxis();
   } else {
-    center.value = drag.center - (dy / plotHeight.value) * span.value;
+    center.value =
+      drag.center - dir.value * (dy / plotHeight.value) * span.value;
     clampView();
   }
 }
@@ -364,7 +380,7 @@ const ticks = computed<Tick[]>(() => {
   for (const tick of raw) {
     const y = yOfP(pOf(tick.day));
     if (y < PLOT_PAD - 12 || y > height.value - PLOT_PAD + 12) continue;
-    if (kept.length > 0 && y - kept[kept.length - 1].y < 52) continue;
+    if (kept.length > 0 && Math.abs(y - kept[kept.length - 1].y) < 52) continue;
     kept.push({ ...tick, y });
   }
   return kept;
@@ -399,7 +415,8 @@ const placed = computed<Record<Side, Placed[]>>(() => {
     const list = events
       .filter((event) => event.side === side && event.lvl <= level.value)
       .map((event) => ({ ...event, anchor: yOfDay(event.day) }))
-      .filter((event) => event.anchor > -160 && event.anchor < height.value + 160)
+      // 时间点移出画布就不再渲染，避免标签贴在边缘
+      .filter((event) => event.anchor >= 0 && event.anchor <= height.value)
       .sort((a, b) => a.anchor - b.anchor);
 
     const tops = avoidOverlap(
@@ -519,11 +536,11 @@ onBeforeUnmount(() => {
 <template>
   <section class="view">
     <header class="view__head">
-      <p class="view__kicker">Scheme 03 · Zoomable Axis</p>
+      <p class="view__kicker">Zoomable Axis</p>
       <h1 class="view__title">缩放时间轴</h1>
       <p class="view__sub">
         一条<b>竖直时间轴</b>：默认水平居中并适配全部数据，可以左右拖动轴线改变位置。
-        鼠标在轴线上滚轮缩放、在轴线之外滚轮则正常滚动页面；上下拖动空白处平移时间。
+        鼠标在轴线上滚轮缩放、在轴线之外滚轮平移时间；上下拖动空白处同样平移时间。
         缩放同时改变事件层级——远景只看主脉，放大后才逐步展开通史与细节。
       </p>
     </header>
@@ -556,6 +573,27 @@ onBeforeUnmount(() => {
         </button>
       </div>
       <div
+        class="seg"
+        role="group"
+        aria-label="时间方向"
+        :title="reversed ? '反向：今天在上，历史向下' : '正向：历史在上，今天在下'"
+      >
+        <button
+          type="button"
+          :class="{ 'is-on': !reversed }"
+          @click="reversed = false"
+        >
+          正向
+        </button>
+        <button
+          type="button"
+          :class="{ 'is-on': reversed }"
+          @click="reversed = true"
+        >
+          反向
+        </button>
+      </div>
+      <div
         v-if="scale === 'log'"
         class="seg"
         role="group"
@@ -579,6 +617,7 @@ onBeforeUnmount(() => {
       class="axis"
       :class="{ 'is-dragging': dragging }"
       @pointerdown="onPointerDown"
+      @wheel.prevent="onCanvasWheel"
     >
       <i
         v-for="tick in ticks"
@@ -655,7 +694,7 @@ onBeforeUnmount(() => {
       <div
         class="axis__band"
         :style="{ left: `${axisX - 32}px` }"
-        @wheel.prevent="onAxisWheel"
+        @wheel.prevent.stop="onAxisWheel"
         @pointermove="onAxisMove"
         @pointerleave="clearHover"
       ></div>
@@ -663,7 +702,7 @@ onBeforeUnmount(() => {
 
     <p class="axis__hint">
       <span class="hint__key">轴上滚轮</span> 缩放 ·
-      <span class="hint__key">轴外滚轮</span> 滚动页面 ·
+      <span class="hint__key">轴外滚轮</span> 平移时间 ·
       <span class="hint__key">左右拖动</span> 移动轴线 ·
       <span class="hint__key">上下拖动</span> 平移时间 ·
       <span class="hint__key">悬停轴线</span> 放大查看年份 / 日期

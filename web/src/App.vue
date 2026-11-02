@@ -37,12 +37,6 @@ onBeforeUnmount(() => {
   <header class="app-nav">
     <div class="app-nav__inner">
       <RouterLink class="brand" to="/">Time<span>Lines</span></RouterLink>
-      <nav class="nav-links">
-        <RouterLink to="/lanes">等比泳道</RouterLink>
-        <RouterLink to="/gantt">横向甘特</RouterLink>
-        <RouterLink to="/zoom">缩放轴</RouterLink>
-        <RouterLink to="/list">清单</RouterLink>
-      </nav>
     </div>
   </header>
 
@@ -50,7 +44,7 @@ onBeforeUnmount(() => {
 
   <footer class="foot">
     <p>
-      <b>TimeLines</b> · 同一份 demo 数据（英国 × 美国，52 个事件）的四种呈现与控制方案。
+      <b>TimeLines</b> · 同一份 demo 数据（英国 × 美国，52 个事件）的缩放时间轴。
     </p>
     <p class="foot__back"><a href="/">← 返回 TimeLines 文档</a></p>
   </footer>

@@ -21,7 +21,7 @@ pnpm dev
 
 修改 `web/src/` 下的文件会自动重新构建，刷新页面即可看到效果。
 
-页面通过 hash 路由切换（如 `/#/gantt`），刷新后仍停留在当前方案。
+前端只有缩放时间轴一条视图；hash 路由会把其他地址重定向回根路径。
 
 ## 项目结构
 
@@ -34,23 +34,14 @@ TimeLines/
 │   ├── tsconfig.json
 │   └── src/
 │       ├── main.ts
-│       ├── App.vue            # 外壳：导航、滚动进度、回到顶部
-│       ├── router.ts          # hash 路由，四个方案各一页
-│       ├── components/
-│       │   ├── TimelineStage.vue  # 等比泳道的布局与交互
-│       │   └── EventBubble.vue    # 单个事件气泡
+│       ├── App.vue            # 外壳：品牌、滚动进度、回到顶部
+│       ├── router.ts          # hash 路由，只有缩放轴一条视图
 │       ├── views/
-│       │   ├── GalleryView.vue    # 方案索引
-│       │   ├── LanesView.vue      # 01 等比泳道
-│       │   ├── GanttView.vue      # 02 横向甘特
-│       │   ├── ZoomView.vue       # 03 缩放轴
-│       │   └── ListView.vue       # 04 世纪清单
+│       │   └── ZoomView.vue   # 缩放时间轴的布局与交互
 │       ├── data/events.ts     # demo 数据集（英国 × 美国）
-│       ├── lib/timeline.ts    # 泳道视图的比例、刻度、避让算法
-│       ├── lib/dataset.ts     # 年份范围、泳道、标签等派生数据
-│       ├── styles/main.css    # 等比泳道样式
-│       ├── styles/views.css   # 外壳与其余方案样式
-│       └── types.ts
+│       ├── lib/timeline.ts    # 标签上下避让算法
+│       ├── lib/dataset.ts     # 泳道与通用工具
+│       └── styles/views.css   # 全局基础样式、外壳与缩放轴样式
 ├── .dev/                      # 开发与构建脚本
 ├── patches/                   # 依赖本地补丁（关闭 Blume 外部字体）
 ├── blume.config.ts            # 文档站点配置
@@ -85,7 +76,7 @@ TimeLines/
 
 - 前端源码只改 `web/src/`；`_build/`、`_dist/` 是构建产物，不要直接编辑。
 - demo 数据集中在 `web/src/data/events.ts`，与渲染逻辑分离，便于后续替换为真实时间线数据。
-- 布局常量与避让算法在 `web/src/lib/timeline.ts`，通用化时应从这里抽出泳道与年份区间配置。
+- 标签避让算法在 `web/src/lib/timeline.ts`，泳道标签与通用工具在 `web/src/lib/dataset.ts`。
 - 新增文档放在 `docs/` 中，Blume 会根据文件树自动生成路由与侧边栏。
 - 构建产物为 `_dist/`，已包含 `/timeline/`，可作为一个静态站点整体部署。
 - 文档站不使用外部字体：`blume.config.ts` 设置 `theme: { fonts: false }`，样式回落到系统字体栈。该开关来自 `patches/blume@1.7.3.patch`，升级 Blume 后需重新生成本地补丁，并确认构建日志不再抓取 Google Fonts。
