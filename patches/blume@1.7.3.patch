@@ -1,0 +1,52 @@
+diff --git a/dist/cli/chunk-7s8hm3b6.js b/dist/cli/chunk-7s8hm3b6.js
+index 3cf54b14335916d4fa5cd0973c2a97efae0d5bb8..1e9ef030263808288a11b2cc19edd9f30bcb9860 100644
+--- a/dist/cli/chunk-7s8hm3b6.js
++++ b/dist/cli/chunk-7s8hm3b6.js
+@@ -4637,11 +4637,14 @@ var themeConfigSchema = z2.strictObject({
+   action: z2.string().optional(),
+   background: perModeValueSchema,
+   backgroundImage: perModeValueSchema,
+-  fonts: z2.strictObject({
+-    body: fontValueSchema.default("inter"),
+-    display: fontValueSchema.default("inter"),
+-    mono: fontValueSchema.default("ibm-plex-mono")
+-  }).prefault({}),
++  fonts: z2.union([
++    z2.literal(false),
++    z2.strictObject({
++      body: fontValueSchema.default("inter"),
++      display: fontValueSchema.default("inter"),
++      mono: fontValueSchema.default("ibm-plex-mono")
++    })
++  ]).prefault({}),
+   layout: z2.enum(["sidebar"]).default("sidebar"),
+   mode: z2.enum(["system", "light", "dark"]).default("system"),
+   radius: z2.enum(["none", "sm", "md", "lg"]).default("md")
+diff --git a/dist/types/core/config-input.d.ts b/dist/types/core/config-input.d.ts
+index 10ad726a3c29a37509c741a1c65936d62066c200..efe76c03fd4b7ab6f41f30ec6b7b3a6106b435fd 100644
+--- a/dist/types/core/config-input.d.ts
++++ b/dist/types/core/config-input.d.ts
+@@ -498,8 +498,8 @@ export interface ThemeConfig {
+     background?: PerModeValue;
+     /** Page background image (CSS `background-image` value), per mode. */
+     backgroundImage?: PerModeValue;
+-    /** Font selection for body, display, and mono roles. */
+-    fonts?: FontsConfig;
++    /** Font selection for body, display, and mono roles. Set `false` for the system stack. */
++    fonts?: FontsConfig | false;
+     /** Overall page layout. Currently only `sidebar`. */
+     layout?: "sidebar";
+     /** Initial color mode. Defaults to `system`. */
+diff --git a/dist/types/theme/fonts.d.ts b/dist/types/theme/fonts.d.ts
+index 9905aee89041c90e5d588a94b021cc55e0aed5e9..863acd43d333c86632ce9ecb52256e540884e947 100644
+--- a/dist/types/theme/fonts.d.ts
++++ b/dist/types/theme/fonts.d.ts
+@@ -49,7 +49,7 @@ export interface LocalFontConfig {
+ /** A role's font: curated slug, remote family, or local files. */
+ export type FontValue = string | RemoteFontConfig | LocalFontConfig;
+ /** Resolved theme fonts (a validated value per role, all optional). */
+-export type FontsConfig = Partial<Record<FontSlot, FontValue>> | undefined;
++export type FontsConfig = Partial<Record<FontSlot, FontValue>> | false | undefined;
+ /** A single Astro `fonts:` entry (sans the literal `fontProviders.*()` call). */
+ export type FontEntry = {
+     kind: "remote";

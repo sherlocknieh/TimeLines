@@ -110,5 +110,7 @@ const timelineApp = {
 export default defineConfig({
   title: "TimeLines",
   description: "英国 × 美国历史时间线：文档与前端混合项目",
+  // 不加载任何自托管字体，样式回落到系统字体栈，构建也不访问 Google Fonts。
+  theme: { fonts: false },
   integrations: [timelineApp],
 });

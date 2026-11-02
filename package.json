@@ -13,7 +13,7 @@
     "doctor": "blume doctor"
   },
   "dependencies": {
-    "blume": "^1.6.4",
+    "blume": "1.7.3",
     "vue": "^3.5.44",
     "vue-router": "^5.4.0"
   },

@@ -52,6 +52,7 @@ TimeLines/
 │       ├── styles/views.css   # 外壳与其余方案样式
 │       └── types.ts
 ├── .dev/                      # 开发与构建脚本
+├── patches/                   # 依赖本地补丁（关闭 Blume 外部字体）
 ├── blume.config.ts            # 文档站点配置
 ├── _build/                    # 前端构建产物（可删）
 ├── _dist/                     # 站点构建产物（可删）
@@ -87,4 +88,5 @@ TimeLines/
 - 布局常量与避让算法在 `web/src/lib/timeline.ts`，通用化时应从这里抽出泳道与年份区间配置。
 - 新增文档放在 `docs/` 中，Blume 会根据文件树自动生成路由与侧边栏。
 - 构建产物为 `_dist/`，已包含 `/timeline/`，可作为一个静态站点整体部署。
+- 文档站不使用外部字体：`blume.config.ts` 设置 `theme: { fonts: false }`，样式回落到系统字体栈。该开关来自 `patches/blume@1.7.3.patch`，升级 Blume 后需重新生成本地补丁，并确认构建日志不再抓取 Google Fonts。
 - 需要清理环境时用 `pnpm clean`；开发服务器运行中会被拒绝，确认无影响后可加 `--force`。

@@ -6,3 +6,4 @@ node_modules/
 # 可删除的构建产物
 _build/
 _dist/
+.blume-verify/
