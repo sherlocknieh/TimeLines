@@ -3,7 +3,6 @@ title: 开发指南
 description: 本地运行、项目结构、命令与开发约定。
 ---
 
-# 开发指南
 
 ## 环境要求
 
@@ -22,6 +21,8 @@ pnpm dev
 
 修改 `web/src/` 下的文件会自动重新构建，刷新页面即可看到效果。
 
+页面通过 hash 路由切换（如 `/#/gantt`），刷新后仍停留在当前方案。
+
 ## 项目结构
 
 ```text
@@ -33,13 +34,22 @@ TimeLines/
 │   ├── tsconfig.json
 │   └── src/
 │       ├── main.ts
-│       ├── App.vue            # 页面骨架、滚动进度、年份跳转
+│       ├── App.vue            # 外壳：导航、滚动进度、回到顶部
+│       ├── router.ts          # hash 路由，四个方案各一页
 │       ├── components/
-│       │   ├── TimelineStage.vue  # 时间轴布局与交互
+│       │   ├── TimelineStage.vue  # 等比泳道的布局与交互
 │       │   └── EventBubble.vue    # 单个事件气泡
+│       ├── views/
+│       │   ├── GalleryView.vue    # 方案索引
+│       │   ├── LanesView.vue      # 01 等比泳道
+│       │   ├── GanttView.vue      # 02 横向甘特
+│       │   ├── ZoomView.vue       # 03 缩放轴
+│       │   └── ListView.vue       # 04 世纪清单
 │       ├── data/events.ts     # demo 数据集（英国 × 美国）
-│       ├── lib/timeline.ts    # 比例、刻度、避让算法
-│       ├── styles/main.css
+│       ├── lib/timeline.ts    # 泳道视图的比例、刻度、避让算法
+│       ├── lib/dataset.ts     # 年份范围、泳道、标签等派生数据
+│       ├── styles/main.css    # 等比泳道样式
+│       ├── styles/views.css   # 外壳与其余方案样式
 │       └── types.ts
 ├── .dev/                      # 开发与构建脚本
 ├── blume.config.ts            # 文档站点配置
