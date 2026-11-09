@@ -99,24 +99,33 @@ body {
 .app-nav__docs:hover { color: var(--ink); }
 
 /* ---------- 通用视图容器 ---------- */
+/* 画布铺满标题栏以下的整块视口，控件浮在其上 */
 .view {
-  max-width: 1180px;
-  margin: 0 auto;
-  display: flex;
-  flex-direction: column;
-  min-height: calc(100vh - var(--nav-h));
-  min-height: calc(100dvh - var(--nav-h));
-  padding: 10px 18px 0;
+  position: relative;
+  height: calc(100vh - var(--nav-h));
+  height: calc(100dvh - var(--nav-h));
 }
 
 /* ---------- 控件条 ---------- */
 .toolbar {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  z-index: 8;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 7px;
-  margin: 0 0 14px;
+  padding: 6px 9px;
+  border: 1px solid var(--line-soft);
+  border-radius: 16px;
+  background: rgba(251, 246, 233, 0.82);
+  backdrop-filter: blur(10px);
+  /* 面板本体不挡住画布，只有控件本身接收指针事件 */
+  pointer-events: none;
 }
+.toolbar > * { pointer-events: auto; }
 .toolbar__spacer { margin-left: auto; }
 .toolbar__value {
   font-family: var(--mono);
@@ -248,12 +257,9 @@ body {
 
 /* ---------- 缩放时间轴 ---------- */
 .axis {
-  position: relative;
-  flex: 1 1 auto;
-  min-height: 320px;
+  position: absolute;
+  inset: 0;
   overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 14px;
   background:
     radial-gradient(900px 520px at 50% 50%, #fffdf8 0%, transparent 72%),
     linear-gradient(180deg, #fffdf9, #faf5e9);
@@ -585,11 +591,21 @@ body {
 .axis__readout.is-left::after { left: 100%; }
 
 .axis__hint {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 8;
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
   gap: 4px 8px;
-  margin: 10px 2px 0;
+  width: max-content;
+  max-width: calc(100% - 24px);
+  padding: 3px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  background: rgba(251, 246, 233, 0.82);
+  backdrop-filter: blur(10px);
   overflow-x: auto;
   font-size: 0.72rem;
   color: var(--ink-3);
@@ -721,7 +737,6 @@ body {
 @media (max-width: 760px) {
   .app-nav__inner { padding: 8px 12px; gap: 10px; }
   .brand { font-size: 0.94rem; }
-  .view { padding-left: 12px; padding-right: 12px; }
   .toolbar { gap: 6px; }
   .search { width: 100%; }
   .axis-event__label { max-width: 156px; font-size: 0.66rem; }
