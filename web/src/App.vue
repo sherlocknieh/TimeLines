@@ -4,6 +4,7 @@ import { RouterLink, RouterView } from "vue-router";
 
 const progress = ref(0);
 const showToTop = ref(false);
+const docsUrl = `${import.meta.env.BASE_URL}docs/`;
 
 function onScroll() {
   const doc = document.documentElement;
@@ -46,7 +47,7 @@ onBeforeUnmount(() => {
     <p>
       <b>TimeLines</b> · 同一份 demo 数据（英国 × 美国，52 个事件）的缩放时间轴。
     </p>
-    <p class="foot__back"><a href="/">← 返回 TimeLines 文档</a></p>
+    <p class="foot__back"><a :href="docsUrl">← 返回 TimeLines 文档</a></p>
   </footer>
 
   <button
