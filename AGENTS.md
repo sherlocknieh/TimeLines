@@ -7,9 +7,9 @@
 TimeLines 是一个通用的时间线整理与可视化工具。仓库同时生成两样东西：
 
 - **文档站**：`docs/` 下的 MDX，由 Blume 构建，开发端口 `4321`。
-- **前端应用**：`web/` 下的 Vue 3 + TypeScript + Vite，占 `/timeline`，使用 hash 路由。
+- **前端应用**：`web/` 下的 Vue 3 + TypeScript + Vite，占 `/TimeLines`，使用 hash 路由。
 
-两者同源构建、同一端口访问。整站部署在 `/timeline/` 下：应用是 `/timeline`，文档是 `/timeline/docs`（由 Blume 的 `deployment.base` + `basePath` 实现）。当前内置「英国 × 美国，100 个事件」的 demo，唯一的显示方案是缩放时间轴；demo 只是示例，工具本身不绑定这个主题。
+两者同源构建、同一端口访问。整站部署在 `/TimeLines/` 下：应用是 `/TimeLines`，文档是 `/TimeLines/docs`（由 Blume 的 `deployment.base` + `basePath` 实现）。当前内置「英国 × 美国，100 个事件」的 demo，唯一的显示方案是缩放时间轴；demo 只是示例，工具本身不绑定这个主题。
 
 ## 先看哪里
 
@@ -42,8 +42,9 @@ web/src/
 
 - `.dev/dev.mjs`：先构建一次前端，再同时启动 Vite watch 与 Blume dev。
 - `.dev/build.mjs`：前端构建到 `_build/` → Blume 构建到 `dist/` → 改名为 `_dist/` → 把 `_build/` 复制到 `_dist/` 根目录（文档在 `_dist/docs/`）。
-- `blume.config.ts`：`deployment.base=/timeline`、`basePath=/docs` 决定文档落在 `/timeline/docs`；开发时把 `_build/` 以 `/timeline/` 提供，并放行带尾斜杠的目录地址。
-- `web/vite.config.ts`：`base=/timeline/`，输出到 `../_build/`。
+- `blume.config.ts`：`DEPLOY_BASE=/TimeLines` 同时用于 `deployment.base` 与开发中间件前缀，`basePath=/docs` 决定文档落在 `/TimeLines/docs`；开发时把 `_build/` 以 `/TimeLines/` 提供，并放行带尾斜杠的目录地址。
+- `web/vite.config.ts`：`base=/TimeLines/`，输出到 `../_build/`。
+- `.github/workflows/deploy.yml`：推送 `main` 或手动触发时构建 `_dist/` 并发布到 GitHub Pages。
 
 ## 数据模型
 
@@ -67,13 +68,13 @@ web/src/
 | 新增/删除事件 | `data/events.ts`；若总数变化，搜索并更新文案里的事件总数 |
 | 新增共享派生数据 | `lib/dataset.ts` |
 | 文档新增页面 | `docs/` 新 MDX，front matter 至少 `title`、`description` |
-| 调整 `/timeline/` 挂载 | `web/vite.config.ts`、`blume.config.ts`、`.dev/build.mjs`、`.dev/preview.mjs` 四处一起改 |
+| 调整 `/TimeLines/` 挂载 | `blume.config.ts` 的 `DEPLOY_BASE`、`web/vite.config.ts` 的 `base`、`.dev/preview.mjs` 的 `BASE_PATH` 三处一起改，并同步文档里的绝对链接 |
 
 ## 不可破坏的约定
 
 - **前端源码在 `web/`**：应用代码改 `web/src/`，构建配置改 `web/vite.config.ts`；`_build/`、`_dist/`、`.blume/` 是可删构建产物。
-- **路由使用 HTML5 history**，打开 `/timeline/` 即进入缩放轴；应用只有根页面，静态托管不需要 SPA 回退。
-- **文档链接按根路径书写**：`basePath` 会把 `/demo` 这类链接改写成 `/timeline/docs/demo`；指向应用 `/timeline/` 的链接必须用裸 `<a href>`，否则会被再拼一层 `/docs`。
+- **路由使用 HTML5 history**，打开 `/TimeLines/` 即进入缩放轴；应用只有根页面，静态托管不需要 SPA 回退。
+- **文档链接按根路径书写**：`basePath` 会把 `/demo` 这类链接改写成 `/TimeLines/docs/demo`；指向应用 `/TimeLines/` 的链接必须用裸 `<a href>`，否则会被再拼一层 `/docs`。
 - **缩放轴是竖向的**：轴线默认水平居中，左右拖动移动轴线，上下拖动平移时间。时间方向可切换，默认历史在上、今天在下，反向时今天在上、历史向下；屏幕映射统一走 `dir`，缩放锚点与滚轮/拖动方向都依赖它。轴上 64px 热区滚轮缩放，热区外的滚轮平移时间而不是滚动页面；这是刻意划分的交互边界。
 - **拖拽容器不要用 pointer capture**：会抢走事件标签按钮的 `click`。现有拖拽代码在 `pointerdown` 时跳过 `button, a`，新交互沿用这个做法。
 - **事件卡片在原地展开**：点选气泡后，卡片取代气泡显示在同一位置，垂直居中于事件锚点并夹在画布内；点空白处、关闭按钮或 `Esc` 收起。不要再把详情放回画布下方。
@@ -90,8 +91,8 @@ pnpm typecheck
 pnpm build
 ```
 
-- `pnpm build` 成功后产物在 `_dist/`，整体即 `/timeline/` 子目录内容；`pnpm preview` 按 `/timeline/` 提供，应用在 `/timeline/`、文档在 `/timeline/docs/`。
-- 改 UI 时打开 `/timeline/`，检查浏览器控制台无报错；额外验证：轴上滚轮缩放、轴外滚轮平移时间、悬停日期读数、轴线左右拖动、L3 细节事件出现、对数与天/月/年切换、对数起点的输入与准星切换。
+- `pnpm build` 成功后产物在 `_dist/`，整体即 `/TimeLines/` 子目录内容；`pnpm preview` 按 `/TimeLines/` 提供，应用在 `/TimeLines/`、文档在 `/TimeLines/docs/`。
+- 改 UI 时打开 `/TimeLines/`，检查浏览器控制台无报错；额外验证：轴上滚轮缩放、轴外滚轮平移时间、悬停日期读数、轴线左右拖动、L3 细节事件出现、对数与天/月/年切换、对数起点的输入与准星切换。
 - 只改文档时可用 `pnpm doctor` 检查 Blume 配置与内容。
 
 ## 现状与待办

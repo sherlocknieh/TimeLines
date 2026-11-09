@@ -16,8 +16,8 @@ pnpm dev
 
 `pnpm dev` 会先构建一次前端，然后同时启动：
 
-- 文档站点：`http://localhost:4321/timeline/docs/`
-- Demo 时间轴：`http://localhost:4321/timeline/`
+- 文档站点：`http://localhost:4321/TimeLines/docs/`
+- Demo 时间轴：`http://localhost:4321/TimeLines/`
 
 修改 `web/src/` 下的文件会自动重新构建，刷新页面即可看到效果。
 
@@ -30,7 +30,7 @@ TimeLines/
 ├── docs/                      # 文档内容（Markdown / MDX）
 ├── web/                       # 时间线前端（Vue + Vite）
 │   ├── index.html             # Vite 入口
-│   ├── vite.config.ts         # base=/timeline/，输出到 _build/
+│   ├── vite.config.ts         # base=/TimeLines/，输出到 _build/
 │   ├── tsconfig.json
 │   └── src/
 │       ├── main.ts
@@ -51,14 +51,14 @@ TimeLines/
 └── package.json               # 统一命令入口
 ```
 
-前端构建产物输出到 `_build/`：开发时由 Blume 直接以 `/timeline/` 提供；`pnpm build` 时先由 Blume 生成文档站点，再把前端产物复制到 `_dist/` 根目录，文档位于 `_dist/docs/`。
+前端构建产物输出到 `_build/`：开发时由 Blume 直接以 `/TimeLines/` 提供；`pnpm build` 时先由 Blume 生成文档站点，再把前端产物复制到 `_dist/` 根目录，文档位于 `_dist/docs/`。
 
 ## 常用命令
 
 | 命令 | 说明 |
 | --- | --- |
 | `pnpm dev` | 构建前端并同时预览文档与 demo |
-| `pnpm dev:web` | 只启动 Vite 开发服务器（带 HMR，`http://localhost:5173/timeline/`） |
+| `pnpm dev:web` | 只启动 Vite 开发服务器（带 HMR，`http://localhost:5173/TimeLines/`） |
 | `pnpm dev:docs` | 构建前端后只启动文档站点 |
 | `pnpm build` | 构建前端并生成静态站点到 `_dist/` |
 | `pnpm clean` | 删除 `_build/`、`_dist/`、`.blume/` 等产物（`--all` 连同 `node_modules/`） |
@@ -78,6 +78,6 @@ TimeLines/
 - demo 数据集中在 `web/src/data/events.ts`，与渲染逻辑分离，便于后续替换为真实时间线数据。
 - 标签遮挡筛选在 `web/src/lib/timeline.ts`，泳道标签与通用工具在 `web/src/lib/dataset.ts`。
 - 新增文档放在 `docs/` 中，Blume 会根据文件树自动生成路由与侧边栏。
-- 构建产物为 `_dist/`，整体就是 `/timeline/` 子目录的内容：应用占 `/timeline`，文档占 `/timeline/docs`。部署到 GitHub Pages 时，把它放到个人主页站点的 `timeline/` 目录下。
+- 构建产物为 `_dist/`，整体就是仓库 Pages 站点的内容：应用占 `/TimeLines`，文档占 `/TimeLines/docs`。推送 `main` 后由 `.github/workflows/deploy.yml` 自动发布到 GitHub Pages。
 - 文档站不使用外部字体：`blume.config.ts` 设置 `theme: { fonts: false }`，样式回落到系统字体栈。该开关来自 `patches/blume@1.7.3.patch`，升级 Blume 后需重新生成本地补丁，并确认构建日志不再抓取 Google Fonts。
 - 需要清理环境时用 `pnpm clean`；开发服务器运行中会被拒绝，确认无影响后可加 `--force`。

@@ -39,10 +39,10 @@ function argValue(name, fallback) {
 const port = Number(argValue("port", 4321));
 const host = argValue("host", "localhost");
 
-// _dist/ 是部署到 /timeline/ 的内容，预览时按同样的子路径提供
-const BASE_PATH = "/timeline";
+// _dist/ 是部署到仓库 Pages 项目路径下的内容，预览时按同样的子路径提供
+const BASE_PATH = "/TimeLines";
 
-/** 解析 /timeline/ 下的请求路径：目录取 index.html，禁止越出 _dist/ */
+/** 解析部署前缀下的请求路径：目录取 index.html，禁止越出 _dist/ */
 function resolveFile(pathname) {
   if (pathname !== BASE_PATH && !pathname.startsWith(`${BASE_PATH}/`)) return null;
 

@@ -26,6 +26,6 @@ if (docs.status !== 0) process.exit(docs.status ?? 1);
 rmSync(distDir, { recursive: true, force: true });
 renameSync(join(root, "dist"), distDir);
 
-// _dist/ 整体部署到 /timeline/：应用放根路径，文档已在 _dist/docs/
+// _dist/ 整体部署到仓库 Pages 项目路径：应用放根路径，文档已在 _dist/docs/
 cpSync(join(root, "_build"), distDir, { recursive: true });
-console.log("构建产物：_dist/（部署到 /timeline/，文档位于 /timeline/docs/）");
+console.log("构建产物：_dist/（部署到 GitHub Pages，文档位于 docs/）");

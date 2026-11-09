@@ -21,6 +21,8 @@ type MiddlewareServer = {
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const appDir = join(root, "_build");
+// 站点整体发布在仓库的 GitHub Pages 项目路径下，应用与文档共用这个前缀
+const DEPLOY_BASE = "/TimeLines";
 
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -40,13 +42,13 @@ const MIME_TYPES: Record<string, string> = {
 };
 
 /**
- * 把 /timeline 映射到 _build/ 下的文件，拒绝目录穿越。
+ * 把部署前缀映射到 _build/ 下的文件，拒绝目录穿越。
  * Vite 在插件中间件之前已剥掉 deployment.base，这里同时兼容带前缀与已剥前缀的路径。
  */
 function resolveAppFile(url: string): string | null {
   const path = decodeURIComponent((url.split("?")[0] ?? "").replace(/\/+$/, ""));
-  const relativePath = path === "/timeline" || path.startsWith("/timeline/")
-    ? path.slice("/timeline".length)
+  const relativePath = path === DEPLOY_BASE || path.startsWith(`${DEPLOY_BASE}/`)
+    ? path.slice(DEPLOY_BASE.length)
     : path;
   const file = relativePath === "" || relativePath.endsWith("/")
     ? `${relativePath}index.html`
@@ -57,7 +59,7 @@ function resolveAppFile(url: string): string | null {
   return target;
 }
 
-// 开发时由 Vite 构建监听写入 _build/，这里把该目录挂在 /timeline/ 下，
+// 开发时由 Vite 构建监听写入 _build/，这里把该目录挂在部署前缀下，
 // 生产构建则由 .dev/build.mjs 复制到 _dist/ 根目录。
 const timelineApp = {
   name: "timeline-app",
@@ -71,7 +73,7 @@ const timelineApp = {
       }) => void;
     }) => {
       updateConfig({
-        // 允许 /timeline/ 带斜杠的目录地址通过开发服务器的尾部斜杠校验
+        // 允许部署前缀带斜杠的目录地址通过开发服务器的尾部斜杠校验
         trailingSlash: "ignore",
         vite: {
           plugins: [
@@ -113,8 +115,8 @@ const timelineApp = {
 export default defineConfig({
   title: "TimeLines",
   description: "英国 × 美国历史时间线：文档与前端混合项目",
-  // 整站发布在个人主页的 /timeline/ 下：应用占 /timeline，文档占 /timeline/docs。
-  deployment: { base: "/timeline" },
+  // 整站发布在仓库的 GitHub Pages 项目路径下：应用占站点根，文档占 /docs。
+  deployment: { base: DEPLOY_BASE },
   basePath: "/docs",
   // 不加载任何自托管字体，样式回落到系统字体栈，构建也不访问 Google Fonts。
   theme: { fonts: false },
