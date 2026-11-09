@@ -1,56 +1,35 @@
-/** 气泡之间的最小垂直间距 */
-const VGAP = 9;
-
-export interface AnchorBox {
+export interface LabelBox {
   anchor: number;
   height: number;
+  level: 1 | 2 | 3;
 }
 
 /**
- * 同一侧气泡的避让布局：以真实年份为锚点，重叠的事件聚成一簇后整体居中，
- * 返回与输入顺序一致的顶部坐标。保持原实现的行为，避免视觉跳动。
+ * 同一侧标签的遮挡筛选：标签保持在真实日期的锚点上，互不遮挡的全部显示；
+ * 发生遮挡时优先保留级别高的事件，同级保留较早者。
+ * 返回与输入顺序一致的可见标记。
  */
-export function avoidOverlap(items: readonly AnchorBox[]): number[] {
-  const tops = new Array<number>(items.length).fill(0);
+export function pickVisible(items: readonly LabelBox[]): boolean[] {
+  const keep = new Array<boolean>(items.length).fill(false);
   const order = items
     .map((_, index) => index)
-    .sort((a, b) => items[a].anchor - items[b].anchor);
+    .sort(
+      (a, b) =>
+        items[a].level - items[b].level || items[a].anchor - items[b].anchor,
+    );
 
-  let cluster: number[] = [];
-  let clusterBottom = -Infinity;
-  let prevBottom = -Infinity;
-
-  const flush = () => {
-    if (cluster.length === 0) return;
-
-    const total =
-      cluster.reduce((sum, index) => sum + items[index].height, 0) +
-      VGAP * (cluster.length - 1);
-    const first = items[cluster[0]].anchor;
-    const last = items[cluster[cluster.length - 1]].anchor;
-
-    let top = (first + last) / 2 - total / 2;
-    if (top < prevBottom + VGAP) top = prevBottom + VGAP;
-
-    let y = top;
-    for (const index of cluster) {
-      tops[index] = y;
-      y += items[index].height + VGAP;
-    }
-    prevBottom = y - VGAP;
-    cluster = [];
-  };
-
+  const kept: number[] = [];
   for (const index of order) {
-    const want = items[index].anchor - items[index].height / 2;
-    if (cluster.length > 0 && want >= clusterBottom + VGAP) flush();
-    clusterBottom =
-      cluster.length === 0
-        ? want + items[index].height
-        : Math.max(clusterBottom, want + items[index].height);
-    cluster.push(index);
+    const box = items[index];
+    const collides = kept.some(
+      (other) =>
+        Math.abs(items[other].anchor - box.anchor) <
+        (items[other].height + box.height) / 2,
+    );
+    if (collides) continue;
+    keep[index] = true;
+    kept.push(index);
   }
-  flush();
 
-  return tops;
+  return keep;
 }

@@ -327,8 +327,9 @@ body {
 }
 .axis__today span {
   position: absolute;
-  left: 12px;
-  top: 3px;
+  left: 14px;
+  top: 0;
+  transform: translateY(-50%);
   padding: 1px 8px;
   border: 1px solid rgba(176, 137, 62, 0.45);
   border-radius: 999px;
@@ -349,8 +350,9 @@ body {
 }
 .axis__origin span {
   position: absolute;
-  right: 12px;
-  top: 3px;
+  right: 14px;
+  top: 0;
+  transform: translateY(-50%);
   padding: 1px 8px;
   border: 1px solid rgba(70, 50, 20, 0.22);
   border-radius: 999px;

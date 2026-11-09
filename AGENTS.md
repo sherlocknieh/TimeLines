@@ -9,7 +9,7 @@ TimeLines 是一个通用的时间线整理与可视化工具。仓库同时生�
 - **文档站**：`docs/` 下的 MDX，由 Blume 构建，开发端口 `4321`。
 - **前端应用**：`web/` 下的 Vue 3 + TypeScript + Vite，占 `/timeline`，使用 hash 路由。
 
-两者同源构建、同一端口访问。整站部署在 `/timeline/` 下：应用是 `/timeline`，文档是 `/timeline/docs`（由 Blume 的 `deployment.base` + `basePath` 实现）。当前内置「英国 × 美国，52 个事件」的 demo，唯一的显示方案是缩放时间轴；demo 只是示例，工具本身不绑定这个主题。
+两者同源构建、同一端口访问。整站部署在 `/timeline/` 下：应用是 `/timeline`，文档是 `/timeline/docs`（由 Blume 的 `deployment.base` + `basePath` 实现）。当前内置「英国 × 美国，100 个事件」的 demo，唯一的显示方案是缩放时间轴；demo 只是示例，工具本身不绑定这个主题。
 
 ## 先看哪里
 
@@ -64,7 +64,7 @@ web/src/
 | 改动 | 需要同步的地方 |
 | --- | --- |
 | 新增一个视图 | `views/` 新组件 + `router.ts` + `docs/views.mdx` + `styles/views.css` |
-| 新增/删除事件 | `data/events.ts`；若总数变化，搜索并更新文案里的 `52` |
+| 新增/删除事件 | `data/events.ts`；若总数变化，搜索并更新文案里的事件总数 |
 | 新增共享派生数据 | `lib/dataset.ts` |
 | 文档新增页面 | `docs/` 新 MDX，front matter 至少 `title`、`description` |
 | 调整 `/timeline/` 挂载 | `web/vite.config.ts`、`blume.config.ts`、`.dev/build.mjs`、`.dev/preview.mjs` 四处一起改 |

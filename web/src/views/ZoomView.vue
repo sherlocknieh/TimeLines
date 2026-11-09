@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import { EVENTS, type Side } from "../data/events";
 import { clamp, laneLabel, laneOf } from "../lib/dataset";
-import { avoidOverlap } from "../lib/timeline";
+import { pickVisible } from "../lib/timeline";
 
 const DAY_MS = 86_400_000;
 const YEAR_DAYS = 365.2425;
@@ -28,10 +28,14 @@ const LEVEL_NAME: Record<1 | 2 | 3, string> = {
 
 /** 轴线与事件标签之间的横向距离 */
 const AXIS_GAP = 30;
-/** 估算的标签高度，用于上下避让 */
-const LABEL_HEIGHT = 26;
-/** 画布上下留白，给最靠边的事件标签留出避让空间 */
+/** 标签高度（像素）：L1 字号更大，用于遮挡判断与垂直居中 */
+const LABEL_HEIGHT: Record<1 | 2 | 3, number> = { 1: 28, 2: 25, 3: 25 };
+/** 画布上下留白，给最靠边的事件标签留出显示空间 */
 const PLOT_PAD = 96;
+/** 事件卡片的尺寸约束，展开后仍要留在画布内 */
+const CARD_MAX_WIDTH = 320;
+const CARD_MIN_WIDTH = 160;
+const CARD_PAD = 12;
 
 /** 以 UTC 日序号表示时间，避免夏令时造成的半天偏移 */
 const utcDay = (year: number, month = 1, day = 1) =>
@@ -87,6 +91,8 @@ const viewport = ref<HTMLElement | null>(null);
 const width = ref(1100);
 const height = ref(560);
 const scale = ref<ScaleMode>("linear");
+/** 对数起点：默认今天，可改成任意日期，起点前后两段都按对数展开 */
+const logOrigin = ref(todayDay);
 const reversed = ref(false);
 const unit = ref<Unit>("year");
 const center = ref(0);
@@ -95,6 +101,11 @@ const axisX = ref(550);
 const selected = ref<number | null>(null);
 const hover = ref<{ y: number; day: number } | null>(null);
 const dragging = ref(false);
+const query = ref("");
+const searchOpen = ref(false);
+const activeResult = ref(0);
+const searchWrap = ref<HTMLElement | null>(null);
+const originInput = ref<HTMLInputElement | null>(null);
 
 const axisMargin = computed(() => Math.min(180, Math.max(110, width.value * 0.26)));
 
@@ -103,17 +114,19 @@ const unitDays = computed(() => UNIT_DAYS[unit.value]);
 /** 屏幕方向：+1 历史在上、今天在下；-1 今天在上、历史向下 */
 const dir = computed(() => (reversed.value ? -1 : 1));
 
-/** 对数模式下以「今天」为原点做有符号对数压缩；线性模式直接用日序号 */
+/** 对数模式以「起点」为界做有符号对数压缩，起点前后都按对数展开；线性模式直接用日序号 */
 function pOf(day: number): number {
   if (scale.value === "linear") return day;
-  const delta = day - todayDay;
+  const delta = day - logOrigin.value;
   return Math.sign(delta) * Math.log1p(Math.abs(delta) / unitDays.value);
 }
 
 function fromP(position: number): number {
   if (scale.value === "linear") return position;
   const sign = Math.sign(position);
-  return todayDay + sign * unitDays.value * Math.expm1(Math.abs(position));
+  return (
+    logOrigin.value + sign * unitDays.value * Math.expm1(Math.abs(position))
+  );
 }
 
 const plotHeight = computed(() => Math.max(1, height.value - PLOT_PAD * 2));
@@ -169,7 +182,7 @@ function fitAll() {
   clampView();
 }
 
-/** 切换坐标分布或基准单位时，尽量保持当前可见的日期区间不变 */
+/** 切换坐标分布、基准单位或对数起点时，尽量保持当前可见的日期区间不变 */
 function preserveView(change: () => void) {
   const before = dayStart.value;
   const after = dayEnd.value;
@@ -193,6 +206,55 @@ function setUnit(next: Unit) {
   preserveView(() => {
     unit.value = next;
   });
+}
+
+/** 换对数起点：日期区间保持不变，只是围绕新起点重新压缩 */
+function setOrigin(day: number) {
+  const next = clamp(Math.round(day), DATA_MIN, DATA_MAX);
+  if (next === logOrigin.value) return;
+  preserveView(() => {
+    logOrigin.value = next;
+  });
+}
+
+const isoOf = (day: number) =>
+  `${yearOf(day)}-${pad(monthOf(day))}-${pad(dateOf(day))}`;
+
+/** 起点就是今天时输入框留空，用占位符表达默认值 */
+const originText = computed(() =>
+  logOrigin.value === todayDay ? "" : isoOf(logOrigin.value),
+);
+
+/** 解析 YYYY / YYYY-MM / YYYY-MM-DD；只写年份时取年中，与无日期的数据一致 */
+function parseDay(text: string): number | null {
+  const match = /^(\d{1,4})(?:-(\d{1,2}))?(?:-(\d{1,2}))?$/.exec(text);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = clamp(Number(match[2] ?? 7), 1, 12);
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const day = clamp(Number(match[3] ?? 1), 1, lastDay);
+  return utcDay(year, month, day);
+}
+
+function applyOrigin(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const raw = input.value.trim();
+  const day = raw ? parseDay(raw) : todayDay;
+  if (day !== null) setOrigin(day);
+  input.value = originText.value;
+}
+
+function resetOrigin() {
+  setOrigin(todayDay);
+  if (originInput.value) originInput.value.value = originText.value;
+}
+
+/** 以某个事件为对数起点：切到对数分布，把起点落在该事件上并居中显示 */
+function useEventOrigin(day: number) {
+  if (scale.value === "linear") setScale("log");
+  setOrigin(day);
+  center.value = pOf(day);
+  clampView();
 }
 
 function zoomAt(factor: number, y: number) {
@@ -272,9 +334,12 @@ function onPointerUp() {
 
 function onPointerDown(event: PointerEvent) {
   if (event.button !== 0) return;
+  // 每次重新按下都是一次新手势，避免上一次拖拽的 moved 标记吞掉气泡点击
+  moved = false;
   const target = event.target as HTMLElement | null;
   if (target?.closest("button, a")) return;
 
+  selected.value = null;
   drag = {
     x: event.clientX,
     y: event.clientY,
@@ -282,7 +347,6 @@ function onPointerDown(event: PointerEvent) {
     axisX: axisX.value,
     mode: null,
   };
-  moved = false;
   dragging.value = true;
   window.addEventListener("pointermove", onPointerMove);
   window.addEventListener("pointerup", onPointerUp);
@@ -293,6 +357,44 @@ function pick(id: number) {
   if (moved) return;
   selected.value = selected.value === id ? null : id;
 }
+
+function closeCard() {
+  selected.value = null;
+}
+
+function onKeydown(event: KeyboardEvent) {
+  if (event.key === "Escape") closeCard();
+}
+
+function onGlobalPointerDown(event: PointerEvent) {
+  if (!searchOpen.value) return;
+  const target = event.target as Node | null;
+  if (target && searchWrap.value?.contains(target)) return;
+  searchOpen.value = false;
+}
+
+let lastSelected: number | null = null;
+let fromSearch = false;
+watch(selected, async (id) => {
+  const previous = lastSelected;
+  lastSelected = id;
+  if (fromSearch) {
+    fromSearch = false;
+    return;
+  }
+  await nextTick();
+  const el = viewport.value;
+  if (!el) return;
+  if (id !== null) {
+    el.querySelector<HTMLButtonElement>(".axis-event__close")?.focus({
+      preventScroll: true,
+    });
+  } else if (previous !== null) {
+    el.querySelector<HTMLButtonElement>(`[data-event="${previous}"]`)?.focus({
+      preventScroll: true,
+    });
+  }
+});
 
 function onAxisMove(event: PointerEvent) {
   const el = viewport.value;
@@ -405,7 +507,6 @@ const levelHint = computed(
 interface Placed extends AxisEvent {
   anchor: number;
   labelTop: number;
-  labelCenter: number;
 }
 
 const placed = computed<Record<Side, Placed[]>>(() => {
@@ -413,51 +514,168 @@ const placed = computed<Record<Side, Placed[]>>(() => {
 
   for (const side of SIDES) {
     const list = events
-      .filter((event) => event.side === side && event.lvl <= level.value)
+      .filter(
+        (event) =>
+          event.side === side &&
+          (event.lvl <= level.value || event.id === selected.value),
+      )
       .map((event) => ({ ...event, anchor: yOfDay(event.day) }))
-      // 时间点移出画布就不再渲染，避免标签贴在边缘
-      .filter((event) => event.anchor >= 0 && event.anchor <= height.value)
+      // 滚出画布的标签由 .axis 的 overflow 裁掉，不提前卸载
       .sort((a, b) => a.anchor - b.anchor);
 
-    const tops = avoidOverlap(
-      list.map((event) => ({ anchor: event.anchor, height: LABEL_HEIGHT })),
+    const keep = pickVisible(
+      list.map((event) => ({
+        anchor: event.anchor,
+        height: LABEL_HEIGHT[event.lvl],
+        level: event.lvl,
+      })),
     );
 
-    result[side] = list.map((event, index) => ({
-      ...event,
-      labelTop: tops[index],
-      labelCenter: tops[index] + LABEL_HEIGHT / 2,
-    }));
+    result[side] = list
+      // 选中的事件始终保留，卡片不因遮挡筛选而消失
+      .filter((event, index) => keep[index] || event.id === selected.value)
+      .map((event) => ({
+        ...event,
+        labelTop: event.anchor - LABEL_HEIGHT[event.lvl] / 2,
+      }));
   }
 
   return result;
 });
 
+/** 标签与轴线之间的水平连线 */
 const links = computed(() => {
-  const out: { id: number; side: Side; d: string }[] = [];
+  const out: { id: number; side: Side; y: number; x2: number }[] = [];
 
   for (const side of SIDES) {
-    const x1 = side === "uk" ? axisX.value - AXIS_GAP : axisX.value + AXIS_GAP;
+    const x2 = side === "uk" ? axisX.value - AXIS_GAP : axisX.value + AXIS_GAP;
     for (const event of placed.value[side]) {
-      const mid = (event.anchor + event.labelCenter) / 2;
-      out.push({
-        id: event.id,
-        side,
-        d: `M${axisX.value},${event.anchor} C${axisX.value},${mid} ${x1},${mid} ${x1},${event.labelCenter}`,
-      });
+      out.push({ id: event.id, side, y: event.anchor, x2 });
     }
   }
 
   return out;
 });
 
-const detail = computed(() =>
-  selected.value === null ? null : events[selected.value],
-);
-
 function stamp(event: AxisEvent): string {
   if (!event.precise || level.value < 3) return String(event.year);
   return `${event.year}-${pad(monthOf(event.day))}-${pad(dateOf(event.day))}`;
+}
+
+function fullStamp(event: AxisEvent): string {
+  if (!event.precise) return String(event.year);
+  return `${event.year}-${pad(monthOf(event.day))}-${pad(dateOf(event.day))}`;
+}
+
+const results = computed<AxisEvent[]>(() => {
+  const q = query.value.trim().toLowerCase();
+  if (!q) return [];
+  return events
+    .filter((event) =>
+      [
+        event.title,
+        event.tag,
+        event.desc,
+        laneLabel(event.side),
+        fullStamp(event),
+      ].some((field) => field.toLowerCase().includes(q)),
+    )
+    .sort((a, b) => a.day - b.day);
+});
+
+const shownResults = computed(() => results.value.slice(0, 8));
+const searchVisible = computed(
+  () => searchOpen.value && query.value.trim().length > 0,
+);
+const activeDescendant = computed(() => {
+  const item = shownResults.value[activeResult.value];
+  return searchVisible.value && item ? `search-option-${item.id}` : undefined;
+});
+
+watch(results, () => {
+  activeResult.value = 0;
+});
+
+function onSearchInput(event: Event) {
+  query.value = (event.target as HTMLInputElement).value;
+  searchOpen.value = true;
+}
+
+function onSearchKeydown(event: KeyboardEvent) {
+  if (event.isComposing) return;
+  const list = shownResults.value;
+  if (event.key === "ArrowDown" && list.length > 0) {
+    event.preventDefault();
+    activeResult.value = (activeResult.value + 1) % list.length;
+  } else if (event.key === "ArrowUp" && list.length > 0) {
+    event.preventDefault();
+    activeResult.value = (activeResult.value - 1 + list.length) % list.length;
+  } else if (event.key === "Enter" && list.length > 0) {
+    event.preventDefault();
+    locate(list[activeResult.value]);
+  } else if (event.key === "Escape" && searchVisible.value) {
+    event.stopPropagation();
+    searchOpen.value = false;
+  }
+}
+
+/** 定位时收窄到的视野（年），0 表示保持当前跨度 */
+const LOCATE_SPAN_YEARS: Record<1 | 2 | 3, number> = { 1: 0, 2: 120, 3: 30 };
+
+/** 定位到搜索结果：居中到该事件，收窄到能显示其层级的跨度，并展开卡片 */
+function locate(event: AxisEvent) {
+  const target = YEAR_DAYS * LOCATE_SPAN_YEARS[event.lvl];
+  if (target > 0 && visibleDays.value > target) {
+    span.value = clamp(
+      scale.value === "linear"
+        ? target
+        : Math.abs(pOf(event.day + target / 2) - pOf(event.day - target / 2)),
+      minSpan.value,
+      maxSpan.value,
+    );
+  }
+  centerOn(event.day);
+  fromSearch = true;
+  selected.value = event.id;
+  searchOpen.value = false;
+}
+
+/** 卡片取代气泡出现在同一位置：贴向轴线一侧，并保证整体留在画布内 */
+function cardStyle(event: Placed) {
+  const room =
+    event.side === "uk"
+      ? axisX.value - AXIS_GAP
+      : width.value - axisX.value - AXIS_GAP;
+  const maxWidth = width.value - CARD_PAD * 2;
+  const cardWidth = clamp(
+    Math.min(room, CARD_MAX_WIDTH),
+    Math.min(CARD_MIN_WIDTH, maxWidth),
+    maxWidth,
+  );
+  const preferred =
+    event.side === "uk"
+      ? axisX.value - AXIS_GAP - cardWidth
+      : axisX.value + AXIS_GAP;
+  const left = clamp(preferred, CARD_PAD, width.value - CARD_PAD - cardWidth);
+  const half = Math.max(
+    48,
+    Math.min(
+      event.anchor - CARD_PAD,
+      height.value - event.anchor - CARD_PAD,
+    ),
+  );
+  const top = clamp(
+    event.anchor,
+    CARD_PAD + half,
+    height.value - CARD_PAD - half,
+  );
+
+  return {
+    left: `${left}px`,
+    top: `${top}px`,
+    width: `${cardWidth}px`,
+    maxHeight: `${half * 2}px`,
+  };
 }
 
 function labelStyle(event: Placed) {
@@ -473,9 +691,7 @@ function labelStyle(event: Placed) {
 }
 
 const todayY = computed(() => yOfDay(todayDay));
-const todayVisible = computed(
-  () => todayY.value > -24 && todayY.value < height.value + 24,
-);
+const originY = computed(() => yOfDay(logOrigin.value));
 
 const hoverText = computed(() => {
   if (!hover.value) return null;
@@ -525,36 +741,80 @@ onMounted(() => {
   fitAll();
   observer = new ResizeObserver(syncSize);
   if (viewport.value) observer.observe(viewport.value);
+  window.addEventListener("keydown", onKeydown);
+  window.addEventListener("pointerdown", onGlobalPointerDown);
 });
 
 onBeforeUnmount(() => {
   observer?.disconnect();
+  window.removeEventListener("keydown", onKeydown);
+  window.removeEventListener("pointerdown", onGlobalPointerDown);
   onPointerUp();
 });
 </script>
 
 <template>
   <section class="view">
-    <header class="view__head">
-      <p class="view__kicker">Zoomable Axis</p>
-      <h1 class="view__title">缩放时间轴</h1>
-      <p class="view__sub">
-        一条<b>竖直时间轴</b>：默认水平居中并适配全部数据，可以左右拖动轴线改变位置。
-        鼠标在轴线上滚轮缩放、在轴线之外滚轮平移时间；上下拖动空白处同样平移时间。
-        缩放同时改变事件层级——远景只看主脉，放大后才逐步展开通史与细节。
-      </p>
-    </header>
-
     <div class="toolbar">
-      <button class="btn btn--icon" type="button" aria-label="缩小" @click="zoomAt(1 / 1.6, height / 2)">−</button>
-      <button class="btn btn--icon" type="button" aria-label="放大" @click="zoomAt(1.6, height / 2)">＋</button>
-      <button class="btn" type="button" @click="fitAll">全览</button>
-      <button class="btn" type="button" @click="centerOn(todayDay)">今天</button>
+      <div ref="searchWrap" class="search" role="search">
+        <svg class="search__icon" viewBox="0 0 16 16" aria-hidden="true">
+          <circle cx="7" cy="7" r="4.5"></circle>
+          <path d="m10.5 10.5 3.5 3.5"></path>
+        </svg>
+        <input
+          class="search__input"
+          type="search"
+          :value="query"
+          placeholder="搜索事件 / 年份 / 分类"
+          aria-label="搜索历史事件"
+          role="combobox"
+          aria-autocomplete="list"
+          aria-controls="event-search-results"
+          :aria-expanded="searchVisible"
+          :aria-activedescendant="activeDescendant"
+          @input="onSearchInput"
+          @focus="searchOpen = true"
+          @keydown="onSearchKeydown"
+        />
+        <ul
+          v-if="searchVisible"
+          id="event-search-results"
+          class="search__results"
+          role="listbox"
+        >
+          <li v-for="(item, index) in shownResults" :key="item.id">
+            <button
+              :id="`search-option-${item.id}`"
+              class="search__result"
+              :class="{ 'is-active': index === activeResult }"
+              type="button"
+              role="option"
+              :aria-selected="index === activeResult"
+              @click="locate(item)"
+            >
+              <b>{{ fullStamp(item) }}</b>
+              <span class="search__title">{{ item.title }}</span>
+              <span class="search__lane">{{ laneLabel(item.side) }}</span>
+            </button>
+          </li>
+          <li v-if="shownResults.length === 0" class="search__empty">
+            没有匹配的事件
+          </li>
+          <li
+            v-else-if="results.length > shownResults.length"
+            class="search__empty"
+          >
+            另有 {{ results.length - shownResults.length }} 条匹配，继续输入以缩小范围
+          </li>
+        </ul>
+      </div>
       <span class="toolbar__value">
         {{ scaleLabel }}<template v-if="scale === 'log'"> · 基准 {{ UNIT_LABEL[unit] }}</template>
         · {{ pxPerYear >= 1 ? pxPerYear.toFixed(1) : pxPerYear.toFixed(3) }} px / 年
       </span>
       <span class="toolbar__spacer"></span>
+      <button class="btn" type="button" @click="fitAll">全览</button>
+      <button class="btn" type="button" @click="centerOn(todayDay)">今天</button>
       <span class="axis-level" :title="levelHint">L{{ level }} · {{ LEVEL_NAME[level] }}</span>
       <div class="seg" role="group" aria-label="刻度分布">
         <button
@@ -597,8 +857,8 @@ onBeforeUnmount(() => {
         v-if="scale === 'log'"
         class="seg"
         role="group"
-        aria-label="今天附近的基准单位"
-        title="对数轴以今天为原点，基准单位决定今天附近被拉开的程度"
+        aria-label="起点附近的基准单位"
+        title="对数轴以起点为界，基准单位决定起点附近被拉开的程度"
       >
         <button
           v-for="item in UNITS"
@@ -608,6 +868,37 @@ onBeforeUnmount(() => {
           @click="setUnit(item)"
         >
           {{ UNIT_LABEL[item] }}
+        </button>
+      </div>
+      <div
+        v-if="scale === 'log'"
+        class="origin"
+        title="对数起点：起点前后两段都按对数展开，越靠近起点越舒展；留空表示以今天为起点"
+      >
+        <label class="origin__label" for="log-origin">起点</label>
+        <input
+          id="log-origin"
+          ref="originInput"
+          class="origin__input"
+          type="text"
+          inputmode="numeric"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="今天"
+          aria-label="对数起点，输入 YYYY 或 YYYY-MM-DD，留空表示今天"
+          :value="originText"
+          @change="applyOrigin"
+          @keydown.enter.prevent="applyOrigin"
+        />
+        <button
+          v-if="originText"
+          class="origin__reset"
+          type="button"
+          aria-label="对数起点回到今天"
+          title="起点回到今天"
+          @click="resetOrigin"
+        >
+          ↺
         </button>
       </div>
     </div>
@@ -636,20 +927,27 @@ onBeforeUnmount(() => {
         :height="height"
         aria-hidden="true"
       >
-        <path
+        <line
           v-for="link in links"
           :key="link.id"
           :class="link.side"
-          :d="link.d"
-        ></path>
+          :x1="axisX"
+          :x2="link.x2"
+          :y1="link.y"
+          :y2="link.y"
+        ></line>
       </svg>
 
-      <div
-        v-if="todayVisible"
-        class="axis__today"
-        :style="{ top: `${todayY}px` }"
-      >
+      <div class="axis__today" :style="{ top: `${todayY}px` }">
         <span>今天</span>
+      </div>
+
+      <div
+        v-if="scale === 'log' && logOrigin !== todayDay"
+        class="axis__origin"
+        :style="{ top: `${originY}px` }"
+      >
+        <span>起点 {{ isoOf(logOrigin) }}</span>
       </div>
 
       <template v-for="side in SIDES" :key="side">
@@ -659,14 +957,53 @@ onBeforeUnmount(() => {
             :class="[`is-${side}`, { 'is-l1': event.lvl === 1 }]"
             :style="{ left: `${axisX}px`, top: `${event.anchor}px` }"
           ></span>
+          <div
+            v-if="selected === event.id"
+            class="axis-event__card"
+            :class="`is-${side}`"
+            role="group"
+            :aria-labelledby="`event-title-${event.id}`"
+            :style="cardStyle(event)"
+            @pointerdown.stop
+            @wheel.stop
+          >
+            <button
+              class="axis-event__close"
+              type="button"
+              aria-label="收起事件卡片"
+              @click.stop="closeCard"
+            >
+              ×
+            </button>
+            <button
+              class="axis-event__origin"
+              :class="{ 'is-on': event.day === logOrigin }"
+              type="button"
+              aria-label="以该事件为对数起点"
+              title="以该事件为对数起点"
+              @click.stop="useEventOrigin(event.day)"
+            >
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <circle cx="8" cy="8" r="3.2"></circle>
+                <path d="M8 1v2.6M8 12.4V15M1 8h2.6M12.4 8H15"></path>
+              </svg>
+            </button>
+            <p class="axis-event__meta">
+              <b>{{ fullStamp(event) }}</b> · {{ laneLabel(side) }} ·
+              {{ event.tag }} · L{{ event.lvl }}
+            </p>
+            <h3 :id="`event-title-${event.id}`" class="axis-event__title">
+              {{ event.title }}
+            </h3>
+            <p class="axis-event__desc">{{ event.desc }}</p>
+          </div>
           <button
+            v-else
             class="axis-event__label"
-            :class="[
-              `is-${side}`,
-              { 'is-active': selected === event.id, 'is-l1': event.lvl === 1 },
-            ]"
+            :class="[`is-${side}`, { 'is-l1': event.lvl === 1 }]"
             :style="labelStyle(event)"
             type="button"
+            :data-event="event.id"
             :title="`${event.year} ${event.title}`"
             @click.stop="pick(event.id)"
           >
@@ -705,21 +1042,8 @@ onBeforeUnmount(() => {
       <span class="hint__key">轴外滚轮</span> 平移时间 ·
       <span class="hint__key">左右拖动</span> 移动轴线 ·
       <span class="hint__key">上下拖动</span> 平移时间 ·
-      <span class="hint__key">悬停轴线</span> 放大查看年份 / 日期
+      <span class="hint__key">悬停轴线</span> 放大查看年份 / 日期 ·
+      <span class="hint__key">点击事件</span> 原位展开卡片
     </p>
-
-    <div class="detail" :class="{ 'is-empty': !detail }">
-      <template v-if="detail">
-        <p class="detail__meta">
-          <b>{{ detail.precise ? `${detail.year}-${pad(monthOf(detail.day))}-${pad(dateOf(detail.day))}` : detail.year }}</b>
-          · {{ laneLabel(detail.side) }} · {{ detail.tag }} · L{{ detail.lvl }}
-        </p>
-        <h2 class="detail__title">{{ detail.title }}</h2>
-        <p class="detail__desc">{{ detail.desc }}</p>
-      </template>
-      <template v-else>
-        {{ levelHint }}。点一个事件查看详情，或切换线性 / 对数观察不同的时间分布。
-      </template>
-    </div>
   </section>
 </template>
