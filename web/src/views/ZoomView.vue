@@ -27,6 +27,9 @@ const AXIS_GAP = 30;
 const LABEL_HEIGHT: Record<1 | 2 | 3, number> = { 1: 28, 2: 25, 3: 25 };
 /** 画布上下留白，给最靠边的事件标签留出显示空间 */
 const PLOT_PAD = 96;
+/** 时间刻度虚线与刻度文字各自的最小像素间距，二者独立筛选 */
+const MIN_TICK_GAP = 24;
+const MIN_TICK_LABEL_GAP = 52;
 /** 事件卡片的尺寸约束，展开后仍要留在画布内 */
 const CARD_MAX_WIDTH = 320;
 const CARD_MIN_WIDTH = 160;
@@ -408,6 +411,8 @@ interface Tick {
   day: number;
   y: number;
   label: string;
+  /** 标签间距不足时只隐藏文字，虚线始终保留 */
+  showLabel: boolean;
 }
 
 const ticks = computed<Tick[]>(() => {
@@ -474,11 +479,18 @@ const ticks = computed<Tick[]>(() => {
   }
 
   const kept: Tick[] = [];
+  let lastLineY = Number.NEGATIVE_INFINITY;
+  let lastLabelY = Number.NEGATIVE_INFINITY;
   for (const tick of raw) {
     const y = yOfP(pOf(tick.day));
     if (y < PLOT_PAD - 12 || y > height.value - PLOT_PAD + 12) continue;
-    if (kept.length > 0 && Math.abs(y - kept[kept.length - 1].y) < 52) continue;
-    kept.push({ ...tick, y });
+    // 刻线只按像素间距筛选，保持均匀网格；对数轴靠近起点时候选很密
+    if (Math.abs(y - lastLineY) < MIN_TICK_GAP) continue;
+    lastLineY = y;
+    // 标签独立按文字高度筛选，刻线不会因标签重叠而消失
+    const showLabel = Math.abs(y - lastLabelY) >= MIN_TICK_LABEL_GAP;
+    if (showLabel) lastLabelY = y;
+    kept.push({ ...tick, y, showLabel });
   }
   return kept;
 });
@@ -739,7 +751,7 @@ onBeforeUnmount(() => {
         class="axis__tick"
         :style="{ top: `${tick.y}px` }"
       >
-        <span>{{ tick.label }}</span>
+        <span v-if="tick.showLabel">{{ tick.label }}</span>
       </i>
 
       <div class="axis__spine" :style="{ left: `${axisX}px` }"></div>
