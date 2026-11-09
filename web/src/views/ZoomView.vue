@@ -312,10 +312,15 @@ function resetOrigin() {
   if (originInput.value) originInput.value.value = originText.value;
 }
 
-/** 以某个事件为中间线基准：切到对数分布并把该事件移到中间线 */
+/** 以某个事件为对数基准：对数模式移到中间线，线性模式只居中，不切换分布 */
 function useEventOrigin(day: number) {
-  if (scale.value === "linear") setScale("log");
-  setOrigin(day);
+  if (scale.value === "log") {
+    setOrigin(day);
+    return;
+  }
+  logOrigin.value = clamp(Math.round(day), DATA_MIN, DATA_MAX);
+  center.value = pOf(day);
+  clampView();
 }
 
 function zoomAt(factor: number, y: number) {
@@ -959,9 +964,7 @@ onBeforeUnmount(() => {
             </button>
             <button
               class="axis-event__origin"
-              :class="{
-                'is-on': scale === 'log' && Math.abs(event.day - logOrigin) < 0.5,
-              }"
+              :class="{ 'is-on': Math.abs(event.day - logOrigin) < 0.5 }"
               type="button"
               aria-label="把该事件移到中间线作为对数基准"
               title="把该事件移到中间线作为对数基准"
