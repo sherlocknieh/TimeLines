@@ -39,9 +39,14 @@ function argValue(name, fallback) {
 const port = Number(argValue("port", 4321));
 const host = argValue("host", "localhost");
 
-/** 解析请求路径：目录取 index.html，禁止越出 _dist/ */
+// _dist/ 是部署到 /timeline/ 的内容，预览时按同样的子路径提供
+const BASE_PATH = "/timeline";
+
+/** 解析 /timeline/ 下的请求路径：目录取 index.html，禁止越出 _dist/ */
 function resolveFile(pathname) {
-  let relative = decodeURIComponent(pathname).replace(/^\/+/, "");
+  if (pathname !== BASE_PATH && !pathname.startsWith(`${BASE_PATH}/`)) return null;
+
+  let relative = decodeURIComponent(pathname.slice(BASE_PATH.length)).replace(/^\/+/, "");
   let target = normalize(join(distDir, relative));
 
   if (target !== distDir && !target.startsWith(`${distDir}${sep}`)) return null;
@@ -81,5 +86,5 @@ const server = createServer((req, res) => {
 });
 
 server.listen(port, host === "true" ? undefined : host, () => {
-  console.log(`预览地址：http://${host === "true" ? "localhost" : host}:${port}/`);
+  console.log(`预览地址：http://${host === "true" ? "localhost" : host}:${port}${BASE_PATH}/`);
 });

@@ -26,5 +26,6 @@ if (docs.status !== 0) process.exit(docs.status ?? 1);
 rmSync(distDir, { recursive: true, force: true });
 renameSync(join(root, "dist"), distDir);
 
-cpSync(join(root, "_build"), join(distDir, "timeline"), { recursive: true });
-console.log("构建产物：_dist/（前端页面位于 _dist/timeline/）");
+// _dist/ 整体部署到 /timeline/：应用放根路径，文档已在 _dist/docs/
+cpSync(join(root, "_build"), distDir, { recursive: true });
+console.log("构建产物：_dist/（部署到 /timeline/，文档位于 /timeline/docs/）");

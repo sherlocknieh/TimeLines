@@ -39,12 +39,15 @@ const MIME_TYPES: Record<string, string> = {
   ".txt": "text/plain; charset=utf-8",
 };
 
-/** 把 /timeline 映射到 _build/ 下的文件，拒绝目录穿越 */
+/**
+ * 把 /timeline 映射到 _build/ 下的文件，拒绝目录穿越。
+ * Vite 在插件中间件之前已剥掉 deployment.base，这里同时兼容带前缀与已剥前缀的路径。
+ */
 function resolveAppFile(url: string): string | null {
   const path = decodeURIComponent((url.split("?")[0] ?? "").replace(/\/+$/, ""));
-  if (path !== "/timeline" && !path.startsWith("/timeline/")) return null;
-
-  const relativePath = path.slice("/timeline".length);
+  const relativePath = path === "/timeline" || path.startsWith("/timeline/")
+    ? path.slice("/timeline".length)
+    : path;
   const file = relativePath === "" || relativePath.endsWith("/")
     ? `${relativePath}index.html`
     : relativePath;
@@ -54,8 +57,8 @@ function resolveAppFile(url: string): string | null {
   return target;
 }
 
-// 开发时由 Vite 构建监听写入 _build/，这里直接把该目录挂到 /timeline/ 下，
-// 生产构建则由 .dev/build.mjs 合入 _dist/timeline/。
+// 开发时由 Vite 构建监听写入 _build/，这里把该目录挂在 /timeline/ 下，
+// 生产构建则由 .dev/build.mjs 复制到 _dist/ 根目录。
 const timelineApp = {
   name: "timeline-app",
   hooks: {
@@ -110,6 +113,9 @@ const timelineApp = {
 export default defineConfig({
   title: "TimeLines",
   description: "英国 × 美国历史时间线：文档与前端混合项目",
+  // 整站发布在个人主页的 /timeline/ 下：应用占 /timeline，文档占 /timeline/docs。
+  deployment: { base: "/timeline" },
+  basePath: "/docs",
   // 不加载任何自托管字体，样式回落到系统字体栈，构建也不访问 Google Fonts。
   theme: { fonts: false },
   integrations: [timelineApp],
