@@ -20,11 +20,6 @@ const UNIT_DAYS: Record<Unit, number> = {
   year: YEAR_DAYS,
 };
 const UNIT_LABEL: Record<Unit, string> = { day: "天", month: "月", year: "年" };
-const LEVEL_NAME: Record<1 | 2 | 3, string> = {
-  1: "主脉",
-  2: "通史",
-  3: "细节",
-};
 
 /** 轴线与事件标签之间的横向距离 */
 const AXIS_GAP = 30;
@@ -488,22 +483,6 @@ const ticks = computed<Tick[]>(() => {
   return kept;
 });
 
-/** 缩放决定显示到哪一层事件：远景只看主脉，近景才展开细节 */
-const level = computed<1 | 2 | 3>(() => {
-  if (visibleDays.value > YEAR_DAYS * 220) return 1;
-  if (visibleDays.value > YEAR_DAYS * 45) return 2;
-  return 3;
-});
-
-const levelHint = computed(
-  () =>
-    ({
-      1: "远景：只显示主脉事件，避免历史被标签淹没",
-      2: "中景：主脉 + 通史事件",
-      3: "近景：展开全部细节事件，可精确到日期",
-    })[level.value],
-);
-
 interface Placed extends AxisEvent {
   anchor: number;
   labelTop: number;
@@ -513,12 +492,9 @@ const placed = computed<Record<Side, Placed[]>>(() => {
   const result: Record<Side, Placed[]> = { uk: [], us: [] };
 
   for (const side of SIDES) {
+    // 任何缩放都纳入全部事件，是否显示只由标签遮挡筛选决定
     const list = events
-      .filter(
-        (event) =>
-          event.side === side &&
-          (event.lvl <= level.value || event.id === selected.value),
-      )
+      .filter((event) => event.side === side)
       .map((event) => ({ ...event, anchor: yOfDay(event.day) }))
       // 滚出画布的标签由 .axis 的 overflow 裁掉，不提前卸载
       .sort((a, b) => a.anchor - b.anchor);
@@ -556,11 +532,6 @@ const links = computed(() => {
 
   return out;
 });
-
-function stamp(event: AxisEvent): string {
-  if (!event.precise || level.value < 3) return String(event.year);
-  return `${event.year}-${pad(monthOf(event.day))}-${pad(dateOf(event.day))}`;
-}
 
 function fullStamp(event: AxisEvent): string {
   if (!event.precise) return String(event.year);
@@ -859,7 +830,7 @@ onBeforeUnmount(() => {
             :title="`${event.year} ${event.title}`"
             @click.stop="pick(event.id)"
           >
-            <b>{{ stamp(event) }}</b><span>{{ event.title }}</span>
+            <b>{{ fullStamp(event) }}</b><span>{{ event.title }}</span>
           </button>
         </template>
       </template>
@@ -948,7 +919,6 @@ onBeforeUnmount(() => {
       <span class="toolbar__spacer"></span>
       <button class="btn" type="button" @click="fitAll">全览</button>
       <button class="btn" type="button" @click="centerOn(todayDay)">今天</button>
-      <span class="axis-level" :title="levelHint">L{{ level }} · {{ LEVEL_NAME[level] }}</span>
       <div class="seg" role="group" aria-label="刻度分布">
         <button
           type="button"
