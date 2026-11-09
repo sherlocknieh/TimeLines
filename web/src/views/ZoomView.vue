@@ -49,6 +49,10 @@ const monthOf = (day: number) => new Date(day * DAY_MS).getUTCMonth() + 1;
 const dateOf = (day: number) => new Date(day * DAY_MS).getUTCDate();
 const pad = (value: number) => String(value).padStart(2, "0");
 
+/** 年份展示：公元前用「前」前缀，纪年原点写作「公元」，避免出现不存在的 0 年 */
+const formatYear = (year: number) =>
+  year < 0 ? `前${-year}` : year === 0 ? "公元" : String(year);
+
 type Precision = "year" | "month" | "day";
 
 interface Stamp {
@@ -71,8 +75,8 @@ function parseStamp(text: string): Stamp {
 
 /** 按书写粒度输出日期：只写年份就不补月份与日，避免制造虚假精度 */
 function stampText(stamp: Stamp): string {
-  const year = yearOf(stamp.day);
-  if (stamp.precision === "year") return String(year);
+  const year = formatYear(yearOf(stamp.day));
+  if (stamp.precision === "year") return year;
   const month = `${year}-${pad(monthOf(stamp.day))}`;
   return stamp.precision === "month"
     ? month
@@ -291,7 +295,7 @@ function setOrigin(day: number) {
 }
 
 const isoOf = (day: number) =>
-  `${yearOf(day)}-${pad(monthOf(day))}-${pad(dateOf(day))}`;
+  `${formatYear(yearOf(day))}-${pad(monthOf(day))}-${pad(dateOf(day))}`;
 
 /** 基准线实时日期：对数模式就是基准日，线性模式取画布中心对应的日期 */
 const middleDay = computed(() => dayOfY(midY.value));
@@ -299,14 +303,14 @@ const middleDay = computed(() => dayOfY(midY.value));
 /** 基准线日期始终显示在气泡与输入框里，拖动或缩放后同步更新 */
 const originText = computed(() => isoOf(Math.round(middleDay.value)));
 
-/** 解析 YYYY / YYYY-MM / YYYY-MM-DD；只写年份时取年中，与无日期的数据一致 */
+/** 解析 前YYYY / YYYY / YYYY-MM / YYYY-MM-DD；只写年份时取年中，与无日期的数据一致 */
 function parseDay(text: string): number | null {
-  const match = /^(\d{1,4})(?:-(\d{1,2}))?(?:-(\d{1,2}))?$/.exec(text);
+  const match = /^(前)?(\d{1,4})(?:-(\d{1,2}))?(?:-(\d{1,2}))?$/.exec(text);
   if (!match) return null;
-  const year = Number(match[1]);
-  const month = clamp(Number(match[2] ?? 7), 1, 12);
+  const year = Number(match[2]) * (match[1] ? -1 : 1);
+  const month = clamp(Number(match[3] ?? 7), 1, 12);
   const lastDay = new Date(utcDay(year, month + 1, 0) * DAY_MS).getUTCDate();
-  const day = clamp(Number(match[3] ?? 1), 1, lastDay);
+  const day = clamp(Number(match[4] ?? 1), 1, lastDay);
   return utcDay(year, month, day);
 }
 
@@ -562,7 +566,7 @@ const ticks = computed<Tick[]>(() => {
     const lastYear = yearOf(end) + 1;
     let guard = 0;
     while (year <= lastYear && guard < 4000) {
-      raw.push({ day: utcDay(year), label: String(year) });
+      raw.push({ day: utcDay(year), label: formatYear(year) });
       year += step;
       guard += 1;
     }
@@ -582,7 +586,10 @@ const ticks = computed<Tick[]>(() => {
       if (day >= start && day <= end) {
         raw.push({
           day,
-          label: step >= 12 ? String(year) : `${year}-${pad(month + 1)}`,
+          label:
+            step >= 12
+              ? formatYear(year)
+              : `${formatYear(year)}-${pad(month + 1)}`,
         });
       }
       month += step;
@@ -697,8 +704,8 @@ const detailStamp = (event: AxisEvent) =>
 const labelStamp = (event: AxisEvent) => {
   if (event.endYear === null) return event.startStamp;
   return event.year === event.endYear
-    ? String(event.year)
-    : `${event.year}–${event.endYear}`;
+    ? formatYear(event.year)
+    : `${formatYear(event.year)}–${formatYear(event.endYear)}`;
 };
 
 const results = computed<AxisEvent[]>(() => {
@@ -841,8 +848,8 @@ const hoverText = computed(() => {
   const day = hover.value.day;
   return {
     y: hover.value.y,
-    year: yearOf(day),
-    full: `${yearOf(day)}-${pad(monthOf(day))}-${pad(dateOf(day))}`,
+    year: formatYear(yearOf(day)),
+    full: `${formatYear(yearOf(day))}-${pad(monthOf(day))}-${pad(dateOf(day))}`,
   };
 });
 
@@ -1181,7 +1188,7 @@ onBeforeUnmount(() => {
           autocomplete="off"
           spellcheck="false"
           placeholder="今天"
-          aria-label="对数基准，输入 YYYY 或 YYYY-MM-DD，留空回到今天"
+          aria-label="对数基准，输入 YYYY、前 YYYY 或 YYYY-MM-DD，留空回到今天"
           :value="originText"
           @change="applyOrigin"
           @keydown.enter.prevent="applyOrigin"
