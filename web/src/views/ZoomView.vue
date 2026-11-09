@@ -731,7 +731,7 @@ function syncSize() {
   if (!el) return;
   const wasCentered = Math.abs(axisX.value - width.value / 2) < 2;
   width.value = Math.max(320, el.clientWidth);
-  height.value = Math.max(320, el.clientHeight);
+  height.value = Math.max(120, el.clientHeight);
   if (wasCentered) axisX.value = width.value / 2;
   clampAxis();
 }
@@ -755,6 +755,139 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="view">
+    <div
+      ref="viewport"
+      class="axis"
+      :class="{ 'is-dragging': dragging }"
+      @pointerdown="onPointerDown"
+      @wheel.prevent="onCanvasWheel"
+    >
+      <i
+        v-for="tick in ticks"
+        :key="tick.day"
+        class="axis__tick"
+        :style="{ top: `${tick.y}px` }"
+      >
+        <span>{{ tick.label }}</span>
+      </i>
+
+      <div class="axis__spine" :style="{ left: `${axisX}px` }"></div>
+
+      <svg
+        class="axis__links"
+        :width="width"
+        :height="height"
+        aria-hidden="true"
+      >
+        <line
+          v-for="link in links"
+          :key="link.id"
+          :class="link.side"
+          :x1="axisX"
+          :x2="link.x2"
+          :y1="link.y"
+          :y2="link.y"
+        ></line>
+      </svg>
+
+      <div class="axis__today" :style="{ top: `${todayY}px` }">
+        <span>今天</span>
+      </div>
+
+      <div
+        v-if="scale === 'log' && logOrigin !== todayDay"
+        class="axis__origin"
+        :style="{ top: `${originY}px` }"
+      >
+        <span>起点 {{ isoOf(logOrigin) }}</span>
+      </div>
+
+      <template v-for="side in SIDES" :key="side">
+        <template v-for="event in placed[side]" :key="event.id">
+          <span
+            class="axis-event__dot"
+            :class="[`is-${side}`, { 'is-l1': event.lvl === 1 }]"
+            :style="{ left: `${axisX}px`, top: `${event.anchor}px` }"
+          ></span>
+          <div
+            v-if="selected === event.id"
+            class="axis-event__card"
+            :class="`is-${side}`"
+            role="group"
+            :aria-labelledby="`event-title-${event.id}`"
+            :style="cardStyle(event)"
+            @pointerdown.stop
+            @wheel.stop
+          >
+            <button
+              class="axis-event__close"
+              type="button"
+              aria-label="收起事件卡片"
+              @click.stop="closeCard"
+            >
+              ×
+            </button>
+            <button
+              class="axis-event__origin"
+              :class="{ 'is-on': event.day === logOrigin }"
+              type="button"
+              aria-label="以该事件为对数起点"
+              title="以该事件为对数起点"
+              @click.stop="useEventOrigin(event.day)"
+            >
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <circle cx="8" cy="8" r="3.2"></circle>
+                <path d="M8 1v2.6M8 12.4V15M1 8h2.6M12.4 8H15"></path>
+              </svg>
+            </button>
+            <p class="axis-event__meta">
+              <b>{{ fullStamp(event) }}</b> · {{ laneLabel(side) }} ·
+              {{ event.tag }} · L{{ event.lvl }}
+            </p>
+            <h3 :id="`event-title-${event.id}`" class="axis-event__title">
+              {{ event.title }}
+            </h3>
+            <p class="axis-event__desc">{{ event.desc }}</p>
+          </div>
+          <button
+            v-else
+            class="axis-event__label"
+            :class="[`is-${side}`, { 'is-l1': event.lvl === 1 }]"
+            :style="labelStyle(event)"
+            type="button"
+            :data-event="event.id"
+            :title="`${event.year} ${event.title}`"
+            @click.stop="pick(event.id)"
+          >
+            <b>{{ stamp(event) }}</b><span>{{ event.title }}</span>
+          </button>
+        </template>
+      </template>
+
+      <i
+        v-if="hover"
+        class="axis__cursor"
+        :style="{ top: `${hover.y}px` }"
+      ></i>
+
+      <div
+        v-if="hoverText"
+        class="axis__readout"
+        :class="readoutRight ? 'is-right' : 'is-left'"
+        :style="hoverReadoutStyle"
+      >
+        <b>{{ hoverText.year }}</b>
+        <span>{{ hoverText.full }}</span>
+      </div>
+
+      <div
+        class="axis__band"
+        :style="{ left: `${axisX - 32}px` }"
+        @wheel.prevent.stop="onAxisWheel"
+        @pointermove="onAxisMove"
+        @pointerleave="clearHover"
+      ></div>
+    </div>
     <div class="toolbar">
       <div ref="searchWrap" class="search" role="search">
         <svg class="search__icon" viewBox="0 0 16 16" aria-hidden="true">
@@ -901,140 +1034,6 @@ onBeforeUnmount(() => {
           ↺
         </button>
       </div>
-    </div>
-
-    <div
-      ref="viewport"
-      class="axis"
-      :class="{ 'is-dragging': dragging }"
-      @pointerdown="onPointerDown"
-      @wheel.prevent="onCanvasWheel"
-    >
-      <i
-        v-for="tick in ticks"
-        :key="tick.day"
-        class="axis__tick"
-        :style="{ top: `${tick.y}px` }"
-      >
-        <span>{{ tick.label }}</span>
-      </i>
-
-      <div class="axis__spine" :style="{ left: `${axisX}px` }"></div>
-
-      <svg
-        class="axis__links"
-        :width="width"
-        :height="height"
-        aria-hidden="true"
-      >
-        <line
-          v-for="link in links"
-          :key="link.id"
-          :class="link.side"
-          :x1="axisX"
-          :x2="link.x2"
-          :y1="link.y"
-          :y2="link.y"
-        ></line>
-      </svg>
-
-      <div class="axis__today" :style="{ top: `${todayY}px` }">
-        <span>今天</span>
-      </div>
-
-      <div
-        v-if="scale === 'log' && logOrigin !== todayDay"
-        class="axis__origin"
-        :style="{ top: `${originY}px` }"
-      >
-        <span>起点 {{ isoOf(logOrigin) }}</span>
-      </div>
-
-      <template v-for="side in SIDES" :key="side">
-        <template v-for="event in placed[side]" :key="event.id">
-          <span
-            class="axis-event__dot"
-            :class="[`is-${side}`, { 'is-l1': event.lvl === 1 }]"
-            :style="{ left: `${axisX}px`, top: `${event.anchor}px` }"
-          ></span>
-          <div
-            v-if="selected === event.id"
-            class="axis-event__card"
-            :class="`is-${side}`"
-            role="group"
-            :aria-labelledby="`event-title-${event.id}`"
-            :style="cardStyle(event)"
-            @pointerdown.stop
-            @wheel.stop
-          >
-            <button
-              class="axis-event__close"
-              type="button"
-              aria-label="收起事件卡片"
-              @click.stop="closeCard"
-            >
-              ×
-            </button>
-            <button
-              class="axis-event__origin"
-              :class="{ 'is-on': event.day === logOrigin }"
-              type="button"
-              aria-label="以该事件为对数起点"
-              title="以该事件为对数起点"
-              @click.stop="useEventOrigin(event.day)"
-            >
-              <svg viewBox="0 0 16 16" aria-hidden="true">
-                <circle cx="8" cy="8" r="3.2"></circle>
-                <path d="M8 1v2.6M8 12.4V15M1 8h2.6M12.4 8H15"></path>
-              </svg>
-            </button>
-            <p class="axis-event__meta">
-              <b>{{ fullStamp(event) }}</b> · {{ laneLabel(side) }} ·
-              {{ event.tag }} · L{{ event.lvl }}
-            </p>
-            <h3 :id="`event-title-${event.id}`" class="axis-event__title">
-              {{ event.title }}
-            </h3>
-            <p class="axis-event__desc">{{ event.desc }}</p>
-          </div>
-          <button
-            v-else
-            class="axis-event__label"
-            :class="[`is-${side}`, { 'is-l1': event.lvl === 1 }]"
-            :style="labelStyle(event)"
-            type="button"
-            :data-event="event.id"
-            :title="`${event.year} ${event.title}`"
-            @click.stop="pick(event.id)"
-          >
-            <b>{{ stamp(event) }}</b><span>{{ event.title }}</span>
-          </button>
-        </template>
-      </template>
-
-      <i
-        v-if="hover"
-        class="axis__cursor"
-        :style="{ top: `${hover.y}px` }"
-      ></i>
-
-      <div
-        v-if="hoverText"
-        class="axis__readout"
-        :class="readoutRight ? 'is-right' : 'is-left'"
-        :style="hoverReadoutStyle"
-      >
-        <b>{{ hoverText.year }}</b>
-        <span>{{ hoverText.full }}</span>
-      </div>
-
-      <div
-        class="axis__band"
-        :style="{ left: `${axisX - 32}px` }"
-        @wheel.prevent.stop="onAxisWheel"
-        @pointermove="onAxisMove"
-        @pointerleave="clearHover"
-      ></div>
     </div>
   </section>
 </template>
