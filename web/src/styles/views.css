@@ -586,14 +586,19 @@ body {
 
 .axis__hint {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 4px 8px;
   margin: 10px 2px 0;
+  overflow-x: auto;
   font-size: 0.72rem;
   color: var(--ink-3);
+  white-space: nowrap;
+  scrollbar-width: none;
 }
+.axis__hint::-webkit-scrollbar { display: none; }
 .axis__hint .hint__key {
+  flex: none;
   font-size: 0.6rem;
   padding: 0 6px;
   border: 1px solid var(--line);
