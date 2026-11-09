@@ -28,8 +28,8 @@ const AXIS_GAP = 30;
 const LABEL_HEIGHT: Record<1 | 2 | 3, number> = { 1: 28, 2: 25, 3: 25 };
 /** 画布上下留白，给最靠边的事件标签留出显示空间 */
 const PLOT_PAD = 96;
-/** 刻度文字的最小像素间距；虚线不筛，密度随对数压缩自然变化 */
-const MIN_TICK_LABEL_GAP = 52;
+/** 刻度文字气泡高度约 20px，留一点间隙即可：只要不重叠就随虚线显示 */
+const MIN_TICK_LABEL_GAP = 22;
 /** 事件卡片的尺寸约束，展开后仍要留在画布内 */
 const CARD_MAX_WIDTH = 320;
 const CARD_MIN_WIDTH = 160;
