@@ -253,6 +253,8 @@ body {
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
+  /* 建立独立的层叠上下文，内部刻度线与文字可各自分层而不外泄 */
+  isolation: isolate;
   background:
     radial-gradient(900px 520px at 50% 50%, #fffdf8 0%, transparent 72%),
     linear-gradient(180deg, #fffdf9, #faf5e9);
@@ -294,21 +296,23 @@ body {
   left: 0;
   right: 0;
   height: 0;
-  z-index: 1;
   pointer-events: none;
 }
+/* 虚线在下、刻度文字在上，避免后渲染的刻线盖住气泡 */
 .axis__tick::before {
   content: "";
   position: absolute;
   left: 0;
   right: 0;
   top: 0;
+  z-index: 1;
   border-top: 1px dashed var(--line-soft);
 }
 .axis__tick span {
   position: absolute;
   left: 14px;
   top: 0;
+  z-index: 2;
   transform: translateY(-50%);
   padding: 1px 7px;
   border: 1px solid var(--line);
