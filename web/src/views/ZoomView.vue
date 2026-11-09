@@ -416,10 +416,13 @@ interface Tick {
 }
 
 const ticks = computed<Tick[]>(() => {
-  const start = Math.min(dayStart.value, dayEnd.value);
-  const end = Math.max(dayStart.value, dayEnd.value);
+  // 按整块画布而非可视区生成刻度，虚线一直画到画布边缘再由 overflow 裁剪
+  const canvasStart = dayOfY(height.value);
+  const canvasEnd = dayOfY(0);
+  const start = Math.min(canvasStart, canvasEnd);
+  const end = Math.max(canvasStart, canvasEnd);
   const days = Math.max(1, end - start);
-  const px = Math.max(1, plotHeight.value);
+  const px = Math.max(1, height.value);
   const raw: { day: number; label: string }[] = [];
 
   if (days > YEAR_DAYS * 3) {
@@ -482,8 +485,8 @@ const ticks = computed<Tick[]>(() => {
   let lastLineY = Number.NEGATIVE_INFINITY;
   let lastLabelY = Number.NEGATIVE_INFINITY;
   for (const tick of raw) {
+    // 越界刻度交给 .axis 的 overflow 裁剪，不在接近边缘时提前卸载
     const y = yOfP(pOf(tick.day));
-    if (y < PLOT_PAD - 12 || y > height.value - PLOT_PAD + 12) continue;
     // 刻线只按像素间距筛选，保持均匀网格；对数轴靠近起点时候选很密
     if (Math.abs(y - lastLineY) < MIN_TICK_GAP) continue;
     lastLineY = y;
