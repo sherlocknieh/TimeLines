@@ -10,6 +10,7 @@ const YEAR_DAYS = 365.2425;
 const TODAY = new Date();
 
 type ScaleMode = "linear" | "log";
+type LogMode = "absolute" | "relative";
 type Unit = "day" | "month" | "year";
 
 const UNITS: Unit[] = ["day", "month", "year"];
@@ -93,7 +94,9 @@ const viewport = ref<HTMLElement | null>(null);
 const width = ref(1100);
 const height = ref(560);
 const scale = ref<ScaleMode>("linear");
-/** 对数起点：默认今天，可改成任意日期，起点前后两段都按对数展开 */
+/** 绝对对数固定以今天为基准，只压缩历史方向；相对对数的起点可移动，两侧都压缩 */
+const logMode = ref<LogMode>("absolute");
+/** 相对对数的起点：默认今天，可改成任意日期，起点前后两段都按对数展开 */
 const logOrigin = ref(todayDay);
 const reversed = ref(false);
 const unit = ref<Unit>("year");
@@ -116,19 +119,29 @@ const unitDays = computed(() => UNIT_DAYS[unit.value]);
 /** 屏幕方向：+1 历史在上、今天在下；-1 今天在上、历史向下 */
 const dir = computed(() => (reversed.value ? -1 : 1));
 
-/** 对数模式以「起点」为界做有符号对数压缩，起点前后都按对数展开；线性模式直接用日序号 */
+/** 当前对数基准日：绝对对数永远是今天，相对对数用可移动起点 */
+const logBase = computed(() =>
+  logMode.value === "absolute" ? todayDay : logOrigin.value,
+);
+
+/**
+ * 线性模式直接用日序号；相对对数以起点为界做有符号对数压缩；
+ * 绝对对数只压缩历史方向，今天之后的余量按基准处斜率线性延伸以保持连续。
+ */
 function pOf(day: number): number {
   if (scale.value === "linear") return day;
-  const delta = day - logOrigin.value;
+  const delta = day - logBase.value;
+  if (logMode.value === "absolute" && delta > 0) return delta / unitDays.value;
   return Math.sign(delta) * Math.log1p(Math.abs(delta) / unitDays.value);
 }
 
 function fromP(position: number): number {
   if (scale.value === "linear") return position;
+  if (logMode.value === "absolute" && position > 0) {
+    return logBase.value + position * unitDays.value;
+  }
   const sign = Math.sign(position);
-  return (
-    logOrigin.value + sign * unitDays.value * Math.expm1(Math.abs(position))
-  );
+  return logBase.value + sign * unitDays.value * Math.expm1(Math.abs(position));
 }
 
 const plotHeight = computed(() => Math.max(1, height.value - PLOT_PAD * 2));
@@ -210,11 +223,19 @@ function setUnit(next: Unit) {
   });
 }
 
-/** 换对数起点：日期区间保持不变，只是围绕新起点重新压缩 */
+function setLogMode(next: LogMode) {
+  if (next === logMode.value) return;
+  preserveView(() => {
+    logMode.value = next;
+  });
+}
+
+/** 换相对对数起点：移动起点会自动切到相对对数，日期区间保持不变 */
 function setOrigin(day: number) {
   const next = clamp(Math.round(day), DATA_MIN, DATA_MAX);
-  if (next === logOrigin.value) return;
+  if (next === logOrigin.value && logMode.value === "relative") return;
   preserveView(() => {
+    logMode.value = "relative";
     logOrigin.value = next;
   });
 }
@@ -714,7 +735,10 @@ const pxPerYear = computed(() =>
   visibleDays.value > 0 ? plotHeight.value / (visibleDays.value / YEAR_DAYS) : 0,
 );
 
-const scaleLabel = computed(() => (scale.value === "log" ? "对数" : "线性"));
+const scaleLabel = computed(() => {
+  if (scale.value === "linear") return "线性";
+  return logMode.value === "absolute" ? "绝对对数" : "相对对数";
+});
 
 let observer: ResizeObserver | undefined;
 
@@ -787,7 +811,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div
-        v-if="scale === 'log' && logOrigin !== todayDay"
+        v-if="scale === 'log' && logMode === 'relative' && logOrigin !== todayDay"
         class="axis__origin"
         :style="{ top: `${originY}px` }"
       >
@@ -823,8 +847,8 @@ onBeforeUnmount(() => {
               class="axis-event__origin"
               :class="{ 'is-on': event.day === logOrigin }"
               type="button"
-              aria-label="以该事件为对数起点"
-              title="以该事件为对数起点"
+              aria-label="以该事件为相对对数起点"
+              title="以该事件为相对对数起点（会自动切到相对对数）"
               @click.stop="useEventOrigin(event.day)"
             >
               <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -957,6 +981,32 @@ onBeforeUnmount(() => {
         </button>
       </div>
       <div
+        v-if="scale === 'log'"
+        class="seg"
+        role="group"
+        aria-label="对数方式"
+        :title="
+          logMode === 'absolute'
+            ? '绝对对数：固定以今天为基准，只压缩历史方向'
+            : '相对对数：起点可移动，起点前后两段都按对数压缩'
+        "
+      >
+        <button
+          type="button"
+          :class="{ 'is-on': logMode === 'absolute' }"
+          @click="setLogMode('absolute')"
+        >
+          绝对
+        </button>
+        <button
+          type="button"
+          :class="{ 'is-on': logMode === 'relative' }"
+          @click="setLogMode('relative')"
+        >
+          相对
+        </button>
+      </div>
+      <div
         class="seg"
         role="group"
         aria-label="时间方向"
@@ -981,8 +1031,8 @@ onBeforeUnmount(() => {
         v-if="scale === 'log'"
         class="seg"
         role="group"
-        aria-label="起点附近的基准单位"
-        title="对数轴以起点为界，基准单位决定起点附近被拉开的程度"
+        aria-label="基准单位"
+        title="基准单位决定靠近对数基准处被拉开的程度"
       >
         <button
           v-for="item in UNITS"
@@ -995,9 +1045,9 @@ onBeforeUnmount(() => {
         </button>
       </div>
       <div
-        v-if="scale === 'log'"
+        v-if="scale === 'log' && logMode === 'relative'"
         class="origin"
-        title="对数起点：起点前后两段都按对数展开，越靠近起点越舒展；留空表示以今天为起点"
+        title="相对对数起点：起点前后两段都按对数展开，越靠近起点越舒展；留空表示以今天为起点"
       >
         <label class="origin__label" for="log-origin">起点</label>
         <input
