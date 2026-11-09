@@ -109,7 +109,7 @@ body {
 /* ---------- 控件条 ---------- */
 .toolbar {
   position: absolute;
-  top: 12px;
+  bottom: 12px;
   left: 12px;
   right: 12px;
   z-index: 8;
@@ -174,7 +174,7 @@ body {
 .search__input::-webkit-search-cancel-button { -webkit-appearance: none; }
 .search__results {
   position: absolute;
-  top: calc(100% + 6px);
+  bottom: calc(100% + 6px);
   left: 0;
   z-index: 60;
   width: max(240px, 100%);
