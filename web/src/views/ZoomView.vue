@@ -1036,14 +1036,5 @@ onBeforeUnmount(() => {
         @pointerleave="clearHover"
       ></div>
     </div>
-
-    <p class="axis__hint">
-      <span class="hint__key">轴上滚轮</span> 缩放 ·
-      <span class="hint__key">轴外滚轮</span> 平移时间 ·
-      <span class="hint__key">左右拖动</span> 移动轴线 ·
-      <span class="hint__key">上下拖动</span> 平移时间 ·
-      <span class="hint__key">悬停轴线</span> 放大查看年份 / 日期 ·
-      <span class="hint__key">点击事件</span> 原位展开卡片
-    </p>
   </section>
 </template>
