@@ -9,7 +9,7 @@ TimeLines 是一个通用的时间线整理与可视化工具。仓库同时生�
 - **文档站**：`docs/` 下的 MDX，由 Blume 构建，开发端口 `4321`。
 - **前端应用**：`web/` 下的 Vue 3 + TypeScript + Vite，占 `/TimeLines`，使用 hash 路由。
 
-两者同源构建、同一端口访问。整站部署在 `/TimeLines/` 下：应用是 `/TimeLines`，文档是 `/TimeLines/docs`（由 Blume 的 `deployment.base` + `basePath` 实现）。当前内置「英国 × 美国，100 个事件」的 demo，唯一的显示方案是缩放时间轴；demo 只是示例，工具本身不绑定这个主题。
+两者同源构建、同一端口访问。整站部署在 `/TimeLines/` 下：应用是 `/TimeLines`，文档是 `/TimeLines/docs`（由 Blume 的 `deployment.base` + `basePath` 实现）。当前内置「英国 × 美国，114 个事件」的 demo，唯一的显示方案是缩放时间轴；demo 只是示例，工具本身不绑定这个主题。
 
 ## 先看哪里
 
