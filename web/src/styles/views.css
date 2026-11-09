@@ -350,7 +350,7 @@ body {
   color: var(--gold);
   white-space: nowrap;
 }
-/* 与中间线气泡重合时上移，避免两个日期气泡叠在一起 */
+/* 与基准线气泡重合时上移，避免两个日期气泡叠在一起 */
 .axis__today.is-lifted span { transform: translateY(-150%); }
 .axis__midline {
   position: absolute;
