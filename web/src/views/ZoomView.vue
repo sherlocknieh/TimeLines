@@ -132,8 +132,10 @@ const viewport = ref<HTMLElement | null>(null);
 const width = ref(1100);
 const height = ref(560);
 const scale = ref<ScaleMode>("linear");
-/** 对数的基准日：始终等于中间线所在日期，中心位置固定为零点 */
+/** 对数的基准日：始终等于基准线所在日期 */
 const logOrigin = ref(todayDay);
+/** 基准线在绘图区内的纵向比例：0 顶部、1 底部，对数模式下可上下拖动 */
+const midRatio = ref(0.5);
 const reversed = ref(false);
 const unit = ref<Unit>("year");
 const center = ref(0);
@@ -155,7 +157,7 @@ const unitDays = computed(() => UNIT_DAYS[unit.value]);
 /** 屏幕方向：+1 历史在上、今天在下；-1 今天在上、历史向下 */
 const dir = computed(() => (reversed.value ? -1 : 1));
 
-/** 线性模式直接用日序号；对数以中间线为界做有符号压缩 */
+/** 线性模式直接用日序号；对数以基准线为界做有符号压缩 */
 function pOf(day: number): number {
   if (scale.value === "linear") return day;
   const delta = day - logOrigin.value;
@@ -172,6 +174,13 @@ function fromP(position: number): number {
 }
 
 const plotHeight = computed(() => Math.max(1, height.value - PLOT_PAD * 2));
+
+/** 基准线所在高度：对数模式取设定比例，线性模式恒为画布中央 */
+const midY = computed(() =>
+  scale.value === "log"
+    ? PLOT_PAD + midRatio.value * plotHeight.value
+    : height.value / 2,
+);
 
 const yOfP = (position: number) =>
   PLOT_PAD +
@@ -193,7 +202,7 @@ const minSpan = computed(() => (scale.value === "linear" ? 2 : 0.01));
 const maxSpan = computed(() =>
   scale.value === "linear"
     ? (DATA_MAX - DATA_MIN) * 2.5
-    : // 对数视野以中间线为轴对称展开：每侧最多展开整个数据跨度，未来不足的部分留白
+    : // 对数视野最多展开整个数据跨度，基准线偏移时不足的一侧留白
       2 * Math.log1p((DATA_MAX - DATA_MIN) / unitDays.value),
 );
 
@@ -202,7 +211,8 @@ function clampView() {
 
   if (scale.value === "log") {
     logOrigin.value = clamp(logOrigin.value, DATA_MIN, DATA_MAX);
-    center.value = 0;
+    // 基准日固定落在基准线上：视野中心随基准线位置偏移，两侧仍对等展开
+    center.value = dir.value * (0.5 - midRatio.value) * span.value;
     return;
   }
 
@@ -220,8 +230,9 @@ function clampAxis() {
 
 function fitAll() {
   if (scale.value === "log") {
-    // 以数据中点作基准时，两侧对数跨度相等，刚好覆盖全部数据
+    // 全览回到居中基准：以数据中点作基准，两侧对数跨度相等，刚好覆盖全部数据
     logOrigin.value = (DATA_MIN + DATA_MAX) / 2;
+    midRatio.value = 0.5;
     span.value = Math.max(
       minSpan.value,
       2 * Math.log1p((DATA_MAX - DATA_MIN) / (2 * unitDays.value)),
@@ -238,18 +249,17 @@ function fitAll() {
   clampView();
 }
 
-/** 切换坐标分布或对数单位时，尽量保持中间线日期与可见跨度不变 */
+/** 切换坐标分布或对数单位时，尽量保持基准线日期与可见跨度不变 */
 function preserveView(change: () => void) {
   const before = dayStart.value;
   const after = dayEnd.value;
-  const middle = dayOfY(height.value / 2);
+  const focal = dayOfY(midY.value);
   change();
   const low = pOf(before);
   const high = pOf(after);
   span.value = Math.max(minSpan.value, Math.abs(high - low));
   if (scale.value === "log") {
-    logOrigin.value = middle;
-    center.value = 0;
+    logOrigin.value = focal;
   } else {
     center.value = (low + high) / 2;
   }
@@ -258,6 +268,8 @@ function preserveView(change: () => void) {
 
 function setScale(next: ScaleMode) {
   if (next === scale.value) return;
+  // 进入对数时基准线回到中央，保证切换前后的可见区间一致
+  if (next === "log") midRatio.value = 0.5;
   preserveView(() => {
     scale.value = next;
   });
@@ -270,22 +282,21 @@ function setUnit(next: Unit) {
   });
 }
 
-/** 切换对数基准：把指定日期移到中间线上 */
+/** 切换对数基准：把指定日期移到基准线上 */
 function setOrigin(day: number) {
   const next = clamp(Math.round(day), DATA_MIN, DATA_MAX);
   if (next === Math.round(logOrigin.value)) return;
   logOrigin.value = next;
-  center.value = 0;
   clampView();
 }
 
 const isoOf = (day: number) =>
   `${yearOf(day)}-${pad(monthOf(day))}-${pad(dateOf(day))}`;
 
-/** 中间线实时日期：对数模式就是基准日，线性模式取画布中心对应的日期 */
-const middleDay = computed(() => dayOfY(height.value / 2));
+/** 基准线实时日期：对数模式就是基准日，线性模式取画布中心对应的日期 */
+const middleDay = computed(() => dayOfY(midY.value));
 
-/** 中间线日期始终显示在气泡与输入框里，拖动或缩放后同步更新 */
+/** 基准线日期始终显示在气泡与输入框里，拖动或缩放后同步更新 */
 const originText = computed(() => isoOf(Math.round(middleDay.value)));
 
 /** 解析 YYYY / YYYY-MM / YYYY-MM-DD；只写年份时取年中，与无日期的数据一致 */
@@ -312,7 +323,7 @@ function resetOrigin() {
   if (originInput.value) originInput.value.value = originText.value;
 }
 
-/** 以某个事件为对数基准：对数模式移到中间线，线性模式只居中，不切换分布 */
+/** 以某个事件为对数基准：对数模式移到基准线，线性模式只居中，不切换分布 */
 function useEventOrigin(day: number) {
   if (scale.value === "log") {
     setOrigin(day);
@@ -328,11 +339,11 @@ function zoomAt(factor: number, y: number) {
   const ratio = (y - PLOT_PAD) / plotHeight.value;
 
   if (scale.value === "log") {
-    // 基准固定在中间线：先求出缩放后锚点的对数位置，再反推能把它留在原处的基准日
+    // 缩放锚点保持不动：按基准线位置算出缩放后该点的对数坐标，再反推基准日
     const anchorDay = dayOfY(y);
-    const position = dir.value * (ratio - 0.5) * next;
+    const nextCenter = dir.value * (0.5 - midRatio.value) * next;
+    const position = nextCenter + dir.value * (ratio - 0.5) * next;
     logOrigin.value = anchorDay - offsetOfP(position);
-    center.value = 0;
   } else {
     const anchor = pOfY(y);
     center.value = anchor + dir.value * (0.5 - ratio) * next;
@@ -363,7 +374,6 @@ function onCanvasWheel(event: WheelEvent) {
 
   if (scale.value === "log") {
     logOrigin.value = fromP(shift);
-    center.value = 0;
   } else {
     center.value += shift;
   }
@@ -373,7 +383,6 @@ function onCanvasWheel(event: WheelEvent) {
 function centerOn(day: number) {
   if (scale.value === "log") {
     logOrigin.value = clamp(day, DATA_MIN, DATA_MAX);
-    center.value = 0;
   } else {
     center.value = pOf(day);
   }
@@ -388,7 +397,8 @@ let drag: {
   origin: number;
   span: number;
   axisX: number;
-  mode: "axis" | "time" | null;
+  midRatio: number;
+  mode: "axis" | "time" | "mid" | null;
 } | null = null;
 let moved = false;
 
@@ -407,12 +417,15 @@ function onPointerMove(event: PointerEvent) {
   if (drag.mode === "axis") {
     axisX.value = drag.axisX + dx;
     clampAxis();
+  } else if (drag.mode === "mid") {
+    // 基准线在绘图区内上下移动，基准日保持不变
+    midRatio.value = clamp(drag.midRatio + dy / plotHeight.value, 0.05, 0.95);
+    clampView();
   } else if (scale.value === "log") {
-    // 以拖拽起点的基准换算中间线日期，避免逐帧叠加造成非线性加速
+    // 以拖拽起点的基准换算基准线日期，避免逐帧叠加造成非线性加速
     logOrigin.value =
       drag.origin +
       offsetOfP(-dir.value * (dy / plotHeight.value) * drag.span);
-    center.value = 0;
     clampView();
   } else {
     center.value =
@@ -436,6 +449,14 @@ function onPointerDown(event: PointerEvent) {
   const target = event.target as HTMLElement | null;
   if (target?.closest("button, a")) return;
 
+  // 基准线只在可移动的对数模式下响应，气泡本身与线附近几条像素都可抓取
+  const rect = viewport.value?.getBoundingClientRect();
+  const onMidline =
+    scale.value === "log" &&
+    rect !== undefined &&
+    (Boolean(target?.closest(".axis__midline")) ||
+      Math.abs(event.clientY - rect.top - midY.value) <= 8);
+
   selected.value = null;
   drag = {
     x: event.clientX,
@@ -444,7 +465,8 @@ function onPointerDown(event: PointerEvent) {
     origin: logOrigin.value,
     span: span.value,
     axisX: axisX.value,
-    mode: null,
+    midRatio: midRatio.value,
+    mode: onMidline ? "mid" : null,
   };
   dragging.value = true;
   window.addEventListener("pointermove", onPointerMove);
@@ -925,14 +947,21 @@ onBeforeUnmount(() => {
 
       <div
         class="axis__today"
-        :class="{ 'is-lifted': Math.abs(todayY - height / 2) < 24 }"
+        :class="{ 'is-lifted': Math.abs(todayY - midY) < 24 }"
         :style="{ top: `${todayY}px` }"
       >
         <span>今天</span>
       </div>
 
-      <div class="axis__midline" :style="{ top: `${height / 2}px` }">
-        <span @wheel.prevent.stop="onAxisWheel">
+      <div class="axis__midline" :style="{ top: `${midY}px` }">
+        <span
+          :title="
+            scale === 'log'
+              ? '上下拖动移动基准线，基准日不变'
+              : '线性模式下基准线固定在中央'
+          "
+          @wheel.prevent.stop="onAxisWheel"
+        >
           基准 {{ originText }}
         </span>
       </div>
@@ -966,8 +995,8 @@ onBeforeUnmount(() => {
               class="axis-event__origin"
               :class="{ 'is-on': Math.abs(event.day - logOrigin) < 0.5 }"
               type="button"
-              aria-label="把该事件移到中间线作为对数基准"
-              title="把该事件移到中间线作为对数基准"
+              aria-label="把该事件移到基准线作为对数基准"
+              title="把该事件移到基准线作为对数基准"
               @click.stop="useEventOrigin(event.day)"
             >
               <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -1140,7 +1169,7 @@ onBeforeUnmount(() => {
       <div
         v-if="scale === 'log'"
         class="origin"
-        title="对数基准：始终取中间线所在日期，越靠近中间线越舒展；输入日期会把该日期移到中间线"
+        title="对数基准：始终取基准线所在日期，越靠近基准线越舒展；拖动基准线改变它的高度，输入日期会把该日期移到基准线"
       >
         <label class="origin__label" for="log-origin">基准</label>
         <input
