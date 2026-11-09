@@ -350,15 +350,15 @@ body {
   color: var(--gold);
   white-space: nowrap;
 }
-.axis__origin {
+.axis__midline {
   position: absolute;
   left: 0;
   right: 0;
   border-top: 1px dashed rgba(70, 50, 20, 0.32);
-  z-index: 1;
+  z-index: 3;
   pointer-events: none;
 }
-.axis__origin span {
+.axis__midline span {
   position: absolute;
   right: 14px;
   top: 0;
@@ -372,6 +372,8 @@ body {
   letter-spacing: 0.08em;
   color: var(--ink-2);
   white-space: nowrap;
+  pointer-events: auto;
+  cursor: zoom-in;
 }
 
 .axis__links {

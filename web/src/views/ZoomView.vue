@@ -135,9 +135,9 @@ const viewport = ref<HTMLElement | null>(null);
 const width = ref(1100);
 const height = ref(560);
 const scale = ref<ScaleMode>("linear");
-/** 绝对对数固定以今天为基准，只压缩历史方向；相对对数的起点可移动，两侧都压缩 */
+/** 绝对对数固定以今天为基准，只压缩历史方向；相对对数以中间线为基准，两侧都压缩 */
 const logMode = ref<LogMode>("absolute");
-/** 相对对数的起点：默认今天，可改成任意日期，起点前后两段都按对数展开 */
+/** 相对对数的基准日：始终等于中间线所在日期，中心位置固定为零点 */
 const logOrigin = ref(todayDay);
 const reversed = ref(false);
 const unit = ref<Unit>("year");
@@ -160,13 +160,13 @@ const unitDays = computed(() => UNIT_DAYS[unit.value]);
 /** 屏幕方向：+1 历史在上、今天在下；-1 今天在上、历史向下 */
 const dir = computed(() => (reversed.value ? -1 : 1));
 
-/** 当前对数基准日：绝对对数永远是今天，相对对数用可移动起点 */
+/** 当前对数基准日：绝对对数永远是今天，相对对数取中间线日期 */
 const logBase = computed(() =>
   logMode.value === "absolute" ? todayDay : logOrigin.value,
 );
 
 /**
- * 线性模式直接用日序号；相对对数以起点为界做有符号对数压缩；
+ * 线性模式直接用日序号；相对对数以中间线为界做有符号对数压缩；
  * 绝对对数只压缩历史方向，今天之后的余量按基准处斜率线性延伸以保持连续。
  */
 function pOf(day: number): number {
@@ -176,13 +176,16 @@ function pOf(day: number): number {
   return Math.sign(delta) * Math.log1p(Math.abs(delta) / unitDays.value);
 }
 
+/** 对数坐标中 position 对应的日期偏移，用于把缩放锚点换算成新的基准日 */
+const offsetOfP = (position: number) =>
+  Math.sign(position) * unitDays.value * Math.expm1(Math.abs(position));
+
 function fromP(position: number): number {
   if (scale.value === "linear") return position;
   if (logMode.value === "absolute" && position > 0) {
     return logBase.value + position * unitDays.value;
   }
-  const sign = Math.sign(position);
-  return logBase.value + sign * unitDays.value * Math.expm1(Math.abs(position));
+  return logBase.value + offsetOfP(position);
 }
 
 const plotHeight = computed(() => Math.max(1, height.value - PLOT_PAD * 2));
@@ -203,14 +206,24 @@ const dayStart = computed(() => fromP(center.value - span.value / 2));
 const dayEnd = computed(() => fromP(center.value + span.value / 2));
 const visibleDays = computed(() => Math.max(1, dayEnd.value - dayStart.value));
 
-const maxSpan = computed(() =>
-  scale.value === "linear"
-    ? (DATA_MAX - DATA_MIN) * 2.5
-    : pOf(SAFE_MAX) - pOf(SAFE_MIN),
-);
 const minSpan = computed(() => (scale.value === "linear" ? 2 : 0.01));
+const maxSpan = computed(() => {
+  if (scale.value === "linear") return (DATA_MAX - DATA_MIN) * 2.5;
+  // 相对对数以中间线为轴对称展开：每侧最多展开整个数据跨度，未来不足的部分留白
+  if (logMode.value === "relative") {
+    return 2 * Math.log1p((DATA_MAX - DATA_MIN) / unitDays.value);
+  }
+  return pOf(SAFE_MAX) - pOf(SAFE_MIN);
+});
 
 function clampView() {
+  if (scale.value === "log" && logMode.value === "relative") {
+    logOrigin.value = clamp(logOrigin.value, DATA_MIN, DATA_MAX);
+    span.value = clamp(span.value, minSpan.value, maxSpan.value);
+    center.value = 0;
+    return;
+  }
+
   span.value = clamp(span.value, minSpan.value, maxSpan.value);
 
   const low = pOf(SAFE_MIN);
@@ -229,24 +242,40 @@ function clampAxis() {
 }
 
 function fitAll() {
-  const low = pOf(DATA_MIN);
-  const high = pOf(DATA_MAX);
-  span.value = Math.max(minSpan.value, high - low);
-  center.value = (low + high) / 2;
+  if (scale.value === "log" && logMode.value === "relative") {
+    // 以数据中点作基准时，两侧对数跨度相等，刚好覆盖全部数据
+    logOrigin.value = (DATA_MIN + DATA_MAX) / 2;
+    span.value = Math.max(
+      minSpan.value,
+      2 * Math.log1p((DATA_MAX - DATA_MIN) / (2 * unitDays.value)),
+    );
+    center.value = 0;
+  } else {
+    const low = pOf(DATA_MIN);
+    const high = pOf(DATA_MAX);
+    span.value = Math.max(minSpan.value, high - low);
+    center.value = (low + high) / 2;
+  }
   axisX.value = width.value / 2;
   selected.value = null;
   clampView();
 }
 
-/** 切换坐标分布、基准单位或对数起点时，尽量保持当前可见的日期区间不变 */
+/** 切换坐标分布、对数单位或对数模式时，尽量保持中间线日期与可见跨度不变 */
 function preserveView(change: () => void) {
   const before = dayStart.value;
   const after = dayEnd.value;
+  const middle = dayOfY(height.value / 2);
   change();
   const low = pOf(before);
   const high = pOf(after);
   span.value = Math.max(minSpan.value, Math.abs(high - low));
-  center.value = (low + high) / 2;
+  if (scale.value === "log" && logMode.value === "relative") {
+    logOrigin.value = middle;
+    center.value = 0;
+  } else {
+    center.value = (low + high) / 2;
+  }
   clampView();
 }
 
@@ -271,23 +300,23 @@ function setLogMode(next: LogMode) {
   });
 }
 
-/** 换相对对数起点：移动起点会自动切到相对对数，日期区间保持不变 */
+/** 切换相对对数基准：把指定日期移到中间线上 */
 function setOrigin(day: number) {
   const next = clamp(Math.round(day), DATA_MIN, DATA_MAX);
-  if (next === logOrigin.value && logMode.value === "relative") return;
-  preserveView(() => {
-    logMode.value = "relative";
-    logOrigin.value = next;
-  });
+  if (next === Math.round(logOrigin.value) && logMode.value === "relative") {
+    return;
+  }
+  logMode.value = "relative";
+  logOrigin.value = next;
+  center.value = 0;
+  clampView();
 }
 
 const isoOf = (day: number) =>
   `${yearOf(day)}-${pad(monthOf(day))}-${pad(dateOf(day))}`;
 
-/** 起点就是今天时输入框留空，用占位符表达默认值 */
-const originText = computed(() =>
-  logOrigin.value === todayDay ? "" : isoOf(logOrigin.value),
-);
+/** 中间线日期始终显示在输入框里，拖动或缩放后同步更新 */
+const originText = computed(() => isoOf(Math.round(logOrigin.value)));
 
 /** 解析 YYYY / YYYY-MM / YYYY-MM-DD；只写年份时取年中，与无日期的数据一致 */
 function parseDay(text: string): number | null {
@@ -313,19 +342,27 @@ function resetOrigin() {
   if (originInput.value) originInput.value.value = originText.value;
 }
 
-/** 以某个事件为对数起点：切到对数分布，把起点落在该事件上并居中显示 */
+/** 以某个事件为中间线基准：切到对数分布并把该事件移到中间线 */
 function useEventOrigin(day: number) {
   if (scale.value === "linear") setScale("log");
   setOrigin(day);
-  center.value = pOf(day);
-  clampView();
 }
 
 function zoomAt(factor: number, y: number) {
-  const anchor = pOfY(y);
   const next = clamp(span.value / factor, minSpan.value, maxSpan.value);
   const ratio = (y - PLOT_PAD) / plotHeight.value;
-  center.value = anchor + dir.value * (0.5 - ratio) * next;
+
+  if (scale.value === "log" && logMode.value === "relative") {
+    // 基准固定在中间线：先求出缩放后锚点的对数位置，再反推能把它留在原处的基准日
+    const anchorDay = dayOfY(y);
+    const position = dir.value * (ratio - 0.5) * next;
+    logOrigin.value = anchorDay - offsetOfP(position);
+    center.value = 0;
+  } else {
+    const anchor = pOfY(y);
+    center.value = anchor + dir.value * (0.5 - ratio) * next;
+  }
+
   span.value = next;
   clampView();
 }
@@ -346,13 +383,25 @@ function onAxisWheel(event: WheelEvent) {
 function onCanvasWheel(event: WheelEvent) {
   const scaleBy =
     event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? plotHeight.value : 1;
-  center.value +=
+  const shift =
     dir.value * ((event.deltaY * scaleBy) / plotHeight.value) * span.value;
+
+  if (scale.value === "log" && logMode.value === "relative") {
+    logOrigin.value = fromP(shift);
+    center.value = 0;
+  } else {
+    center.value += shift;
+  }
   clampView();
 }
 
 function centerOn(day: number) {
-  center.value = pOf(day);
+  if (scale.value === "log" && logMode.value === "relative") {
+    logOrigin.value = clamp(day, DATA_MIN, DATA_MAX);
+    center.value = 0;
+  } else {
+    center.value = pOf(day);
+  }
   clampView();
   selected.value = null;
 }
@@ -361,6 +410,8 @@ let drag: {
   x: number;
   y: number;
   center: number;
+  origin: number;
+  span: number;
   axisX: number;
   mode: "axis" | "time" | null;
 } | null = null;
@@ -381,6 +432,13 @@ function onPointerMove(event: PointerEvent) {
   if (drag.mode === "axis") {
     axisX.value = drag.axisX + dx;
     clampAxis();
+  } else if (scale.value === "log" && logMode.value === "relative") {
+    // 以拖拽起点的基准换算中间线日期，避免逐帧叠加造成非线性加速
+    logOrigin.value =
+      drag.origin +
+      offsetOfP(-dir.value * (dy / plotHeight.value) * drag.span);
+    center.value = 0;
+    clampView();
   } else {
     center.value =
       drag.center - dir.value * (dy / plotHeight.value) * span.value;
@@ -408,6 +466,8 @@ function onPointerDown(event: PointerEvent) {
     x: event.clientX,
     y: event.clientY,
     center: center.value,
+    origin: logOrigin.value,
+    span: span.value,
     axisX: axisX.value,
     mode: null,
   };
@@ -714,7 +774,9 @@ function locate(event: AxisEvent) {
     span.value = clamp(
       scale.value === "linear"
         ? target
-        : Math.abs(pOf(middle + target / 2) - pOf(middle - target / 2)),
+        : scale.value === "log" && logMode.value === "relative"
+          ? 2 * Math.log1p(target / 2 / unitDays.value)
+          : Math.abs(pOf(middle + target / 2) - pOf(middle - target / 2)),
       minSpan.value,
       maxSpan.value,
     );
@@ -776,7 +838,6 @@ function labelStyle(event: Placed) {
 }
 
 const todayY = computed(() => yOfDay(todayDay));
-const originY = computed(() => yOfDay(logOrigin.value));
 
 const hoverText = computed(() => {
   if (!hover.value) return null;
@@ -892,12 +953,13 @@ onBeforeUnmount(() => {
         <span>今天</span>
       </div>
 
-      <div
-        v-if="scale === 'log' && logMode === 'relative' && logOrigin !== todayDay"
-        class="axis__origin"
-        :style="{ top: `${originY}px` }"
-      >
-        <span>起点 {{ isoOf(logOrigin) }}</span>
+      <div class="axis__midline" :style="{ top: `${height / 2}px` }">
+        <span
+          v-if="scale === 'log' && logMode === 'relative'"
+          @wheel.prevent.stop="onAxisWheel"
+        >
+          基准 {{ originText }}
+        </span>
       </div>
 
       <template v-for="side in SIDES" :key="side">
@@ -927,10 +989,14 @@ onBeforeUnmount(() => {
             </button>
             <button
               class="axis-event__origin"
-              :class="{ 'is-on': event.day === logOrigin }"
+              :class="{
+                'is-on':
+                  logMode === 'relative' &&
+                  Math.abs(event.day - logOrigin) < 0.5,
+              }"
               type="button"
-              aria-label="以该事件为相对对数起点"
-              title="以该事件为相对对数起点（会自动切到相对对数）"
+              aria-label="把该事件移到中间线作为相对对数基准"
+              title="把该事件移到中间线作为相对对数基准"
               @click.stop="useEventOrigin(event.day)"
             >
               <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -1040,7 +1106,7 @@ onBeforeUnmount(() => {
         </ul>
       </div>
       <span class="toolbar__value">
-        {{ scaleLabel }}<template v-if="scale === 'log'"> · 基准 {{ UNIT_LABEL[unit] }}</template>
+        {{ scaleLabel }}<template v-if="scale === 'log'"> · 单位 {{ UNIT_LABEL[unit] }}</template>
         · {{ pxPerYear >= 1 ? pxPerYear.toFixed(1) : pxPerYear.toFixed(3) }} px / 年
       </span>
       <span class="toolbar__spacer"></span>
@@ -1113,8 +1179,8 @@ onBeforeUnmount(() => {
         v-if="scale === 'log'"
         class="seg"
         role="group"
-        aria-label="基准单位"
-        title="基准单位决定靠近对数基准处被拉开的程度"
+        aria-label="对数单位"
+        title="对数单位决定靠近基准处被拉开的程度"
       >
         <button
           v-for="item in UNITS"
@@ -1129,9 +1195,9 @@ onBeforeUnmount(() => {
       <div
         v-if="scale === 'log' && logMode === 'relative'"
         class="origin"
-        title="相对对数起点：起点前后两段都按对数展开，越靠近起点越舒展；留空表示以今天为起点"
+        title="相对对数基准：始终取中间线所在日期，越靠近中间线越舒展；输入日期会把该日期移到中间线"
       >
-        <label class="origin__label" for="log-origin">起点</label>
+        <label class="origin__label" for="log-origin">基准</label>
         <input
           id="log-origin"
           ref="originInput"
@@ -1141,17 +1207,17 @@ onBeforeUnmount(() => {
           autocomplete="off"
           spellcheck="false"
           placeholder="今天"
-          aria-label="对数起点，输入 YYYY 或 YYYY-MM-DD，留空表示今天"
+          aria-label="相对对数基准，输入 YYYY 或 YYYY-MM-DD，留空回到今天"
           :value="originText"
           @change="applyOrigin"
           @keydown.enter.prevent="applyOrigin"
         />
         <button
-          v-if="originText"
+          v-if="Math.round(logOrigin) !== todayDay"
           class="origin__reset"
           type="button"
-          aria-label="对数起点回到今天"
-          title="起点回到今天"
+          aria-label="相对对数基准回到今天"
+          title="基准回到今天"
           @click="resetOrigin"
         >
           ↺
