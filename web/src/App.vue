@@ -44,13 +44,6 @@ onBeforeUnmount(() => {
 
   <RouterView />
 
-  <footer class="foot">
-    <p>
-      <b>TimeLines</b> · 同一份 demo 数据（英国 × 美国，100 个事件）的缩放时间轴。
-    </p>
-    <p class="foot__back"><a :href="docsUrl">← 返回 TimeLines 文档</a></p>
-  </footer>
-
   <button
     class="to-top"
     :class="{ show: showToTop }"

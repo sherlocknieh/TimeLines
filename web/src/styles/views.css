@@ -14,6 +14,8 @@
   --uk: #9d2235;
   --us: #1f3f7a;
   --gold: #b0893e;
+  /* 顶部导航高度，视图按剩余视口伸展 */
+  --nav-h: 47px;
 
   --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Songti SC",
     "Noto Serif CJK SC", "Source Han Serif SC", "SimSun", serif;
@@ -99,8 +101,12 @@ body {
 /* ---------- 通用视图容器 ---------- */
 .view {
   max-width: 1180px;
-  margin: 10px auto;
-  padding: 10px 18px clamp(48px, 7vw, 76px);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - var(--nav-h));
+  min-height: calc(100dvh - var(--nav-h));
+  padding: 10px 18px 0;
 }
 
 /* ---------- 控件条 ---------- */
@@ -243,7 +249,8 @@ body {
 /* ---------- 缩放时间轴 ---------- */
 .axis {
   position: relative;
-  height: min(72vh, 660px);
+  flex: 1 1 auto;
+  min-height: 320px;
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -678,33 +685,6 @@ body {
   color: var(--ink);
 }
 
-/* ---------- 页脚 ---------- */
-.foot {
-  max-width: 720px;
-  margin: 0 auto;
-  padding: 0 24px clamp(56px, 8vw, 100px);
-  text-align: center;
-  color: var(--ink-3);
-  font-size: 0.78rem;
-  line-height: 1.9;
-}
-.foot b { color: var(--ink-2); font-weight: 600; }
-.foot__back {
-  margin-top: 18px;
-  font-family: var(--mono);
-  font-size: 0.72rem;
-  letter-spacing: 0.08em;
-}
-.foot__back a {
-  color: var(--ink-2);
-  text-decoration: none;
-  border-bottom: 1px solid var(--line);
-}
-.foot__back a:hover {
-  color: var(--ink);
-  border-bottom-color: var(--ink-3);
-}
-
 .to-top {
   position: fixed;
   right: 22px;
@@ -739,7 +719,6 @@ body {
   .view { padding-left: 12px; padding-right: 12px; }
   .toolbar { gap: 6px; }
   .search { width: 100%; }
-  .axis { height: 64vh; }
   .axis-event__label { max-width: 156px; font-size: 0.66rem; }
   .axis-event__label span { max-width: 92px; }
   .axis-level { display: none; }
