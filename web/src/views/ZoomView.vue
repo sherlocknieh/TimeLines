@@ -36,8 +36,12 @@ const CARD_MIN_WIDTH = 160;
 const CARD_PAD = 12;
 
 /** 以 UTC 日序号表示时间，避免夏令时造成的半天偏移 */
-const utcDay = (year: number, month = 1, day = 1) =>
-  Date.UTC(year, month - 1, day) / DAY_MS;
+const utcDay = (year: number, month = 1, day = 1) => {
+  // Date.UTC 会把 0–99 年当作 1900–1999 年，用 setUTCFullYear 保留真实年份
+  const date = new Date(0);
+  date.setUTCFullYear(year, month - 1, day);
+  return date.getTime() / DAY_MS;
+};
 
 const dayFromIso = (iso: string) => {
   const [year, month, day] = iso.split("-").map(Number);
@@ -229,7 +233,7 @@ function parseDay(text: string): number | null {
   if (!match) return null;
   const year = Number(match[1]);
   const month = clamp(Number(match[2] ?? 7), 1, 12);
-  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const lastDay = new Date(utcDay(year, month + 1, 0) * DAY_MS).getUTCDate();
   const day = clamp(Number(match[3] ?? 1), 1, lastDay);
   return utcDay(year, month, day);
 }
@@ -487,8 +491,10 @@ const ticks = computed<Tick[]>(() => {
   for (const tick of raw) {
     // 越界刻度交给 .axis 的 overflow 裁剪，不在接近边缘时提前卸载
     const y = yOfP(pOf(tick.day));
+    // 公元 0 年是纪元分界，无论间距如何都保留，避免在压缩区被筛掉
+    const isEraBoundary = tick.label === "0";
     // 刻线只按像素间距筛选，保持均匀网格；对数轴靠近起点时候选很密
-    if (Math.abs(y - lastLineY) < MIN_TICK_GAP) continue;
+    if (!isEraBoundary && Math.abs(y - lastLineY) < MIN_TICK_GAP) continue;
     lastLineY = y;
     // 标签独立按文字高度筛选，刻线不会因标签重叠而消失
     const showLabel = Math.abs(y - lastLabelY) >= MIN_TICK_LABEL_GAP;
