@@ -831,14 +831,6 @@ const hoverReadoutStyle = computed(() => {
       };
 });
 
-const pxPerYear = computed(() =>
-  visibleDays.value > 0 ? plotHeight.value / (visibleDays.value / YEAR_DAYS) : 0,
-);
-
-const scaleLabel = computed(() =>
-  scale.value === "linear" ? "线性" : "对数",
-);
-
 let observer: ResizeObserver | undefined;
 
 function syncSize() {
@@ -1071,10 +1063,6 @@ onBeforeUnmount(() => {
           </li>
         </ul>
       </div>
-      <span class="toolbar__value">
-        {{ scaleLabel }}<template v-if="scale === 'log'"> · 单位 {{ UNIT_LABEL[unit] }}</template>
-        · {{ pxPerYear >= 1 ? pxPerYear.toFixed(1) : pxPerYear.toFixed(3) }} px / 年
-      </span>
       <span class="toolbar__spacer"></span>
       <button class="btn" type="button" @click="fitAll">全览</button>
       <button class="btn" type="button" @click="centerOn(todayDay)">今天</button>

@@ -119,12 +119,6 @@ body {
   background: rgba(251, 246, 233, 0.9);
 }
 .toolbar__spacer { margin-left: auto; }
-.toolbar__value {
-  font-family: var(--mono);
-  font-size: 0.7rem;
-  color: var(--ink-3);
-  padding-left: 4px;
-}
 .search {
   position: relative;
   display: flex;
