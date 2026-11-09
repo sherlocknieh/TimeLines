@@ -383,6 +383,12 @@ body {
 }.axis__links line { stroke-width: 1; }
 .axis__links line.uk { stroke: rgba(157, 34, 53, 0.3); }
 .axis__links line.us { stroke: rgba(31, 63, 122, 0.3); }
+.axis__links line.axis__range {
+  stroke-width: 4;
+  stroke-linecap: round;
+}
+.axis__links line.axis__range.uk { stroke: rgba(157, 34, 53, 0.42); }
+.axis__links line.axis__range.us { stroke: rgba(31, 63, 122, 0.42); }
 
 .axis-event__dot {
   position: absolute;

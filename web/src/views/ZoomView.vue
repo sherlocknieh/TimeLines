@@ -24,6 +24,8 @@ const UNIT_LABEL: Record<Unit, string> = { day: "天", month: "月", year: "年"
 
 /** 轴线与事件标签之间的横向距离 */
 const AXIS_GAP = 30;
+/** 区间线段与轴线的横向偏移，落在标签连线内侧 */
+const RANGE_OFFSET = 8;
 /** 标签高度（像素）：L1 字号更大，用于遮挡判断与垂直居中 */
 const LABEL_HEIGHT: Record<1 | 2 | 3, number> = { 1: 28, 2: 25, 3: 25 };
 /** 画布上下留白，给最靠边的事件标签留出显示空间 */
@@ -43,43 +45,83 @@ const utcDay = (year: number, month = 1, day = 1) => {
   return date.getTime() / DAY_MS;
 };
 
-const dayFromIso = (iso: string) => {
-  const [year, month, day] = iso.split("-").map(Number);
-  return utcDay(year, month, day);
-};
-
 const yearOf = (day: number) => new Date(day * DAY_MS).getUTCFullYear();
 const monthOf = (day: number) => new Date(day * DAY_MS).getUTCMonth() + 1;
 const dateOf = (day: number) => new Date(day * DAY_MS).getUTCDate();
 const pad = (value: number) => String(value).padStart(2, "0");
+
+type Precision = "year" | "month" | "day";
+
+interface Stamp {
+  day: number;
+  year: number;
+  precision: Precision;
+}
+
+/** 解析 YYYY / YYYY-MM / YYYY-MM-DD，保留书写粒度以决定展示精度 */
+function parseStamp(text: string): Stamp {
+  const [year, month, day] = text.split("-").map(Number);
+  if (month === undefined) {
+    return { day: utcDay(year, 7, 1), year, precision: "year" };
+  }
+  if (day === undefined) {
+    return { day: utcDay(year, month, 1), year, precision: "month" };
+  }
+  return { day: utcDay(year, month, day), year, precision: "day" };
+}
+
+/** 按书写粒度输出日期：只写年份就不补月份与日，避免制造虚假精度 */
+function stampText(stamp: Stamp): string {
+  const year = yearOf(stamp.day);
+  if (stamp.precision === "year") return String(year);
+  const month = `${year}-${pad(monthOf(stamp.day))}`;
+  return stamp.precision === "month"
+    ? month
+    : `${month}-${pad(dateOf(stamp.day))}`;
+}
 
 const todayDay = utcDay(TODAY.getFullYear(), TODAY.getMonth() + 1, TODAY.getDate());
 
 interface AxisEvent {
   id: number;
   day: number;
+  endDay: number | null;
   year: number;
+  endYear: number | null;
   side: Side;
   lvl: 1 | 2 | 3;
-  precise: boolean;
+  startStamp: string;
+  endStamp: string | null;
   tag: string;
   title: string;
   desc: string;
 }
 
-const events: AxisEvent[] = EVENTS.map((event, id) => ({
-  id,
-  day: event.date ? dayFromIso(event.date) : utcDay(event.y, 7, 1),
-  year: event.y,
-  side: laneOf(event),
-  lvl: event.lvl ?? 2,
-  precise: Boolean(event.date),
-  tag: event.tag,
-  title: event.t,
-  desc: event.d,
-}));
+const events: AxisEvent[] = EVENTS.map((event, id) => {
+  const start: Stamp = event.date
+    ? parseStamp(event.date)
+    : { day: utcDay(event.y, 7, 1), year: event.y, precision: "year" };
+  const end = event.end ? parseStamp(event.end) : null;
 
-const eventDays = events.map((event) => event.day);
+  return {
+    id,
+    day: start.day,
+    endDay: end?.day ?? null,
+    year: start.year,
+    endYear: end?.year ?? null,
+    side: laneOf(event),
+    lvl: event.lvl ?? 2,
+    startStamp: stampText(start),
+    endStamp: end ? stampText(end) : null,
+    tag: event.tag,
+    title: event.t,
+    desc: event.d,
+  };
+});
+
+const eventDays = events.flatMap((event) =>
+  event.endDay === null ? [event.day] : [event.day, event.endDay],
+);
 /** 数据范围：历史端留一点余量，未来端止于今天 */
 const DATA_MIN = Math.min(...eventDays) - Math.round(YEAR_DAYS * 3);
 const DATA_MAX = Math.max(...eventDays, todayDay);
@@ -568,10 +610,39 @@ const links = computed(() => {
   return out;
 });
 
-function fullStamp(event: AxisEvent): string {
-  if (!event.precise) return String(event.year);
-  return `${event.year}-${pad(monthOf(event.day))}-${pad(dateOf(event.day))}`;
-}
+/** 区间线段：标签被遮挡筛选隐藏时，时间跨度本身仍如实显示 */
+const ranges = computed(() => {
+  const out: { id: number; side: Side; x: number; y1: number; y2: number }[] =
+    [];
+
+  for (const side of SIDES) {
+    const x = axisX.value + (side === "uk" ? -RANGE_OFFSET : RANGE_OFFSET);
+    for (const event of events) {
+      if (event.side !== side || event.endDay === null) continue;
+      out.push({
+        id: event.id,
+        side,
+        x,
+        y1: yOfDay(event.day),
+        y2: yOfDay(event.endDay),
+      });
+    }
+  }
+
+  return out;
+});
+
+/** 卡片与搜索使用的完整日期；区间事件给出两个端点 */
+const detailStamp = (event: AxisEvent) =>
+  event.endStamp ? `${event.startStamp}–${event.endStamp}` : event.startStamp;
+
+/** 标签保持紧凑：跨年区间只写年份，同年区间不重复年份 */
+const labelStamp = (event: AxisEvent) => {
+  if (event.endYear === null) return event.startStamp;
+  return event.year === event.endYear
+    ? String(event.year)
+    : `${event.year}–${event.endYear}`;
+};
 
 const results = computed<AxisEvent[]>(() => {
   const q = query.value.trim().toLowerCase();
@@ -583,7 +654,8 @@ const results = computed<AxisEvent[]>(() => {
         event.tag,
         event.desc,
         laneLabel(event.side),
-        fullStamp(event),
+        labelStamp(event),
+        detailStamp(event),
       ].some((field) => field.toLowerCase().includes(q)),
     )
     .sort((a, b) => a.day - b.day);
@@ -630,17 +702,24 @@ const LOCATE_SPAN_YEARS: Record<1 | 2 | 3, number> = { 1: 0, 2: 120, 3: 30 };
 
 /** 定位到搜索结果：居中到该事件，收窄到能显示其层级的跨度，并展开卡片 */
 function locate(event: AxisEvent) {
-  const target = YEAR_DAYS * LOCATE_SPAN_YEARS[event.lvl];
-  if (target > 0 && visibleDays.value > target) {
+  const end = event.endDay ?? event.day;
+  const middle = (event.day + end) / 2;
+  const duration = Math.abs(end - event.day);
+  // 区间事件至少要让整个区间落在视野内，再叠加层级要求的跨度
+  const target = Math.max(YEAR_DAYS * LOCATE_SPAN_YEARS[event.lvl], duration);
+  if (
+    target > 0 &&
+    (visibleDays.value > target || duration > visibleDays.value)
+  ) {
     span.value = clamp(
       scale.value === "linear"
         ? target
-        : Math.abs(pOf(event.day + target / 2) - pOf(event.day - target / 2)),
+        : Math.abs(pOf(middle + target / 2) - pOf(middle - target / 2)),
       minSpan.value,
       maxSpan.value,
     );
   }
-  centerOn(event.day);
+  centerOn(middle);
   fromSearch = true;
   selected.value = event.id;
   searchOpen.value = false;
@@ -789,6 +868,16 @@ onBeforeUnmount(() => {
         aria-hidden="true"
       >
         <line
+          v-for="range in ranges"
+          :key="`range-${range.id}`"
+          class="axis__range"
+          :class="range.side"
+          :x1="range.x"
+          :x2="range.x"
+          :y1="range.y1"
+          :y2="range.y2"
+        ></line>
+        <line
           v-for="link in links"
           :key="link.id"
           :class="link.side"
@@ -850,7 +939,7 @@ onBeforeUnmount(() => {
               </svg>
             </button>
             <p class="axis-event__meta">
-              <b>{{ fullStamp(event) }}</b> · {{ laneLabel(side) }} ·
+              <b>{{ detailStamp(event) }}</b> · {{ laneLabel(side) }} ·
               {{ event.tag }} · L{{ event.lvl }}
             </p>
             <h3 :id="`event-title-${event.id}`" class="axis-event__title">
@@ -865,10 +954,10 @@ onBeforeUnmount(() => {
             :style="labelStyle(event)"
             type="button"
             :data-event="event.id"
-            :title="`${event.year} ${event.title}`"
+            :title="`${labelStamp(event)} ${event.title}`"
             @click.stop="pick(event.id)"
           >
-            <b>{{ fullStamp(event) }}</b><span>{{ event.title }}</span>
+            <b>{{ labelStamp(event) }}</b><span>{{ event.title }}</span>
           </button>
         </template>
       </template>
@@ -934,7 +1023,7 @@ onBeforeUnmount(() => {
               :aria-selected="index === activeResult"
               @click="locate(item)"
             >
-              <b>{{ fullStamp(item) }}</b>
+              <b>{{ detailStamp(item) }}</b>
               <span class="search__title">{{ item.title }}</span>
               <span class="search__lane">{{ laneLabel(item.side) }}</span>
             </button>
