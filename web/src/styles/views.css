@@ -698,7 +698,8 @@ body {
   .app-nav__inner { padding: 8px 12px; gap: 10px; }
   .brand { font-size: 0.94rem; }
   .toolbar { gap: 6px; }
-  .search { width: 100%; }
+  /* 搜索框随行宽伸缩，始终与按钮同排，不单独占一行 */
+  .search { flex: 1 1 120px; width: auto; min-width: 96px; }
   .axis-event__label { max-width: 156px; font-size: 0.66rem; }
   .axis-event__label span { max-width: 92px; }
 }
