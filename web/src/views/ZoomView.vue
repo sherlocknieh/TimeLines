@@ -10,7 +10,6 @@ const YEAR_DAYS = 365.2425;
 const TODAY = new Date();
 
 type ScaleMode = "linear" | "log";
-type LogMode = "absolute" | "relative";
 type Unit = "day" | "month" | "year";
 
 const UNITS: Unit[] = ["day", "month", "year"];
@@ -125,19 +124,15 @@ const eventDays = events.flatMap((event) =>
 /** 数据范围：历史端留一点余量，未来端止于今天 */
 const DATA_MIN = Math.min(...eventDays) - Math.round(YEAR_DAYS * 3);
 const DATA_MAX = Math.max(...eventDays, todayDay);
-/** 今天之后只留少量可平移空间，避免空白的未来占掉太多画布 */
-const FUTURE_PAD = Math.round(YEAR_DAYS * 2);
-/** 允许平移/缩放的硬边界，避免对数坐标算出无法表示的日期 */
+/** 线性平移/缩放的安全边界，避免拖到数据之外的空白 */
 const SAFE_MIN = DATA_MIN - Math.round(YEAR_DAYS * 2500);
-const SAFE_MAX = DATA_MAX + FUTURE_PAD;
+const SAFE_MAX = DATA_MAX + Math.round(YEAR_DAYS * 2);
 
 const viewport = ref<HTMLElement | null>(null);
 const width = ref(1100);
 const height = ref(560);
 const scale = ref<ScaleMode>("linear");
-/** 绝对对数固定以今天为基准，只压缩历史方向；相对对数以中间线为基准，两侧都压缩 */
-const logMode = ref<LogMode>("absolute");
-/** 相对对数的基准日：始终等于中间线所在日期，中心位置固定为零点 */
+/** 对数的基准日：始终等于中间线所在日期，中心位置固定为零点 */
 const logOrigin = ref(todayDay);
 const reversed = ref(false);
 const unit = ref<Unit>("year");
@@ -160,19 +155,10 @@ const unitDays = computed(() => UNIT_DAYS[unit.value]);
 /** 屏幕方向：+1 历史在上、今天在下；-1 今天在上、历史向下 */
 const dir = computed(() => (reversed.value ? -1 : 1));
 
-/** 当前对数基准日：绝对对数永远是今天，相对对数取中间线日期 */
-const logBase = computed(() =>
-  logMode.value === "absolute" ? todayDay : logOrigin.value,
-);
-
-/**
- * 线性模式直接用日序号；相对对数以中间线为界做有符号对数压缩；
- * 绝对对数只压缩历史方向，今天之后的余量按基准处斜率线性延伸以保持连续。
- */
+/** 线性模式直接用日序号；对数以中间线为界做有符号压缩 */
 function pOf(day: number): number {
   if (scale.value === "linear") return day;
-  const delta = day - logBase.value;
-  if (logMode.value === "absolute" && delta > 0) return delta / unitDays.value;
+  const delta = day - logOrigin.value;
   return Math.sign(delta) * Math.log1p(Math.abs(delta) / unitDays.value);
 }
 
@@ -182,10 +168,7 @@ const offsetOfP = (position: number) =>
 
 function fromP(position: number): number {
   if (scale.value === "linear") return position;
-  if (logMode.value === "absolute" && position > 0) {
-    return logBase.value + position * unitDays.value;
-  }
-  return logBase.value + offsetOfP(position);
+  return logOrigin.value + offsetOfP(position);
 }
 
 const plotHeight = computed(() => Math.max(1, height.value - PLOT_PAD * 2));
@@ -207,33 +190,27 @@ const dayEnd = computed(() => fromP(center.value + span.value / 2));
 const visibleDays = computed(() => Math.max(1, dayEnd.value - dayStart.value));
 
 const minSpan = computed(() => (scale.value === "linear" ? 2 : 0.01));
-const maxSpan = computed(() => {
-  if (scale.value === "linear") return (DATA_MAX - DATA_MIN) * 2.5;
-  // 相对对数以中间线为轴对称展开：每侧最多展开整个数据跨度，未来不足的部分留白
-  if (logMode.value === "relative") {
-    return 2 * Math.log1p((DATA_MAX - DATA_MIN) / unitDays.value);
-  }
-  return pOf(SAFE_MAX) - pOf(SAFE_MIN);
-});
+const maxSpan = computed(() =>
+  scale.value === "linear"
+    ? (DATA_MAX - DATA_MIN) * 2.5
+    : // 对数视野以中间线为轴对称展开：每侧最多展开整个数据跨度，未来不足的部分留白
+      2 * Math.log1p((DATA_MAX - DATA_MIN) / unitDays.value),
+);
 
 function clampView() {
-  if (scale.value === "log" && logMode.value === "relative") {
+  span.value = clamp(span.value, minSpan.value, maxSpan.value);
+
+  if (scale.value === "log") {
     logOrigin.value = clamp(logOrigin.value, DATA_MIN, DATA_MAX);
-    span.value = clamp(span.value, minSpan.value, maxSpan.value);
     center.value = 0;
     return;
   }
 
-  span.value = clamp(span.value, minSpan.value, maxSpan.value);
-
-  const low = pOf(SAFE_MIN);
-  const high = pOf(SAFE_MAX);
   const half = span.value / 2;
-
-  if (span.value >= high - low) {
-    center.value = (low + high) / 2;
+  if (span.value >= SAFE_MAX - SAFE_MIN) {
+    center.value = (SAFE_MIN + SAFE_MAX) / 2;
   } else {
-    center.value = clamp(center.value, low + half, high - half);
+    center.value = clamp(center.value, SAFE_MIN + half, SAFE_MAX - half);
   }
 }
 
@@ -242,7 +219,7 @@ function clampAxis() {
 }
 
 function fitAll() {
-  if (scale.value === "log" && logMode.value === "relative") {
+  if (scale.value === "log") {
     // 以数据中点作基准时，两侧对数跨度相等，刚好覆盖全部数据
     logOrigin.value = (DATA_MIN + DATA_MAX) / 2;
     span.value = Math.max(
@@ -261,7 +238,7 @@ function fitAll() {
   clampView();
 }
 
-/** 切换坐标分布、对数单位或对数模式时，尽量保持中间线日期与可见跨度不变 */
+/** 切换坐标分布或对数单位时，尽量保持中间线日期与可见跨度不变 */
 function preserveView(change: () => void) {
   const before = dayStart.value;
   const after = dayEnd.value;
@@ -270,7 +247,7 @@ function preserveView(change: () => void) {
   const low = pOf(before);
   const high = pOf(after);
   span.value = Math.max(minSpan.value, Math.abs(high - low));
-  if (scale.value === "log" && logMode.value === "relative") {
+  if (scale.value === "log") {
     logOrigin.value = middle;
     center.value = 0;
   } else {
@@ -293,20 +270,10 @@ function setUnit(next: Unit) {
   });
 }
 
-function setLogMode(next: LogMode) {
-  if (next === logMode.value) return;
-  preserveView(() => {
-    logMode.value = next;
-  });
-}
-
-/** 切换相对对数基准：把指定日期移到中间线上 */
+/** 切换对数基准：把指定日期移到中间线上 */
 function setOrigin(day: number) {
   const next = clamp(Math.round(day), DATA_MIN, DATA_MAX);
-  if (next === Math.round(logOrigin.value) && logMode.value === "relative") {
-    return;
-  }
-  logMode.value = "relative";
+  if (next === Math.round(logOrigin.value)) return;
   logOrigin.value = next;
   center.value = 0;
   clampView();
@@ -352,7 +319,7 @@ function zoomAt(factor: number, y: number) {
   const next = clamp(span.value / factor, minSpan.value, maxSpan.value);
   const ratio = (y - PLOT_PAD) / plotHeight.value;
 
-  if (scale.value === "log" && logMode.value === "relative") {
+  if (scale.value === "log") {
     // 基准固定在中间线：先求出缩放后锚点的对数位置，再反推能把它留在原处的基准日
     const anchorDay = dayOfY(y);
     const position = dir.value * (ratio - 0.5) * next;
@@ -386,7 +353,7 @@ function onCanvasWheel(event: WheelEvent) {
   const shift =
     dir.value * ((event.deltaY * scaleBy) / plotHeight.value) * span.value;
 
-  if (scale.value === "log" && logMode.value === "relative") {
+  if (scale.value === "log") {
     logOrigin.value = fromP(shift);
     center.value = 0;
   } else {
@@ -396,7 +363,7 @@ function onCanvasWheel(event: WheelEvent) {
 }
 
 function centerOn(day: number) {
-  if (scale.value === "log" && logMode.value === "relative") {
+  if (scale.value === "log") {
     logOrigin.value = clamp(day, DATA_MIN, DATA_MAX);
     center.value = 0;
   } else {
@@ -432,7 +399,7 @@ function onPointerMove(event: PointerEvent) {
   if (drag.mode === "axis") {
     axisX.value = drag.axisX + dx;
     clampAxis();
-  } else if (scale.value === "log" && logMode.value === "relative") {
+  } else if (scale.value === "log") {
     // 以拖拽起点的基准换算中间线日期，避免逐帧叠加造成非线性加速
     logOrigin.value =
       drag.origin +
@@ -774,7 +741,7 @@ function locate(event: AxisEvent) {
     span.value = clamp(
       scale.value === "linear"
         ? target
-        : scale.value === "log" && logMode.value === "relative"
+        : scale.value === "log"
           ? 2 * Math.log1p(target / 2 / unitDays.value)
           : Math.abs(pOf(middle + target / 2) - pOf(middle - target / 2)),
       minSpan.value,
@@ -868,10 +835,9 @@ const pxPerYear = computed(() =>
   visibleDays.value > 0 ? plotHeight.value / (visibleDays.value / YEAR_DAYS) : 0,
 );
 
-const scaleLabel = computed(() => {
-  if (scale.value === "linear") return "线性";
-  return logMode.value === "absolute" ? "绝对对数" : "相对对数";
-});
+const scaleLabel = computed(() =>
+  scale.value === "linear" ? "线性" : "对数",
+);
 
 let observer: ResizeObserver | undefined;
 
@@ -954,10 +920,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="axis__midline" :style="{ top: `${height / 2}px` }">
-        <span
-          v-if="scale === 'log' && logMode === 'relative'"
-          @wheel.prevent.stop="onAxisWheel"
-        >
+        <span v-if="scale === 'log'" @wheel.prevent.stop="onAxisWheel">
           基准 {{ originText }}
         </span>
       </div>
@@ -990,13 +953,11 @@ onBeforeUnmount(() => {
             <button
               class="axis-event__origin"
               :class="{
-                'is-on':
-                  logMode === 'relative' &&
-                  Math.abs(event.day - logOrigin) < 0.5,
+                'is-on': scale === 'log' && Math.abs(event.day - logOrigin) < 0.5,
               }"
               type="button"
-              aria-label="把该事件移到中间线作为相对对数基准"
-              title="把该事件移到中间线作为相对对数基准"
+              aria-label="把该事件移到中间线作为对数基准"
+              title="把该事件移到中间线作为对数基准"
               @click.stop="useEventOrigin(event.day)"
             >
               <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -1129,32 +1090,6 @@ onBeforeUnmount(() => {
         </button>
       </div>
       <div
-        v-if="scale === 'log'"
-        class="seg"
-        role="group"
-        aria-label="对数方式"
-        :title="
-          logMode === 'absolute'
-            ? '绝对对数：固定以今天为基准，只压缩历史方向'
-            : '相对对数：起点可移动，起点前后两段都按对数压缩'
-        "
-      >
-        <button
-          type="button"
-          :class="{ 'is-on': logMode === 'absolute' }"
-          @click="setLogMode('absolute')"
-        >
-          绝对
-        </button>
-        <button
-          type="button"
-          :class="{ 'is-on': logMode === 'relative' }"
-          @click="setLogMode('relative')"
-        >
-          相对
-        </button>
-      </div>
-      <div
         class="seg"
         role="group"
         aria-label="时间方向"
@@ -1193,9 +1128,9 @@ onBeforeUnmount(() => {
         </button>
       </div>
       <div
-        v-if="scale === 'log' && logMode === 'relative'"
+        v-if="scale === 'log'"
         class="origin"
-        title="相对对数基准：始终取中间线所在日期，越靠近中间线越舒展；输入日期会把该日期移到中间线"
+        title="对数基准：始终取中间线所在日期，越靠近中间线越舒展；输入日期会把该日期移到中间线"
       >
         <label class="origin__label" for="log-origin">基准</label>
         <input
@@ -1207,7 +1142,7 @@ onBeforeUnmount(() => {
           autocomplete="off"
           spellcheck="false"
           placeholder="今天"
-          aria-label="相对对数基准，输入 YYYY 或 YYYY-MM-DD，留空回到今天"
+          aria-label="对数基准，输入 YYYY 或 YYYY-MM-DD，留空回到今天"
           :value="originText"
           @change="applyOrigin"
           @keydown.enter.prevent="applyOrigin"
@@ -1216,7 +1151,7 @@ onBeforeUnmount(() => {
           v-if="Math.round(logOrigin) !== todayDay"
           class="origin__reset"
           type="button"
-          aria-label="相对对数基准回到今天"
+          aria-label="对数基准回到今天"
           title="基准回到今天"
           @click="resetOrigin"
         >
