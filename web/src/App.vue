@@ -38,6 +38,7 @@ onBeforeUnmount(() => {
   <header class="app-nav">
     <div class="app-nav__inner">
       <RouterLink class="brand" to="/">Time<span>Lines</span></RouterLink>
+      <a class="app-nav__docs" :href="docsUrl">文档</a>
     </div>
   </header>
 
