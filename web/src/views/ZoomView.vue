@@ -282,8 +282,11 @@ function setOrigin(day: number) {
 const isoOf = (day: number) =>
   `${yearOf(day)}-${pad(monthOf(day))}-${pad(dateOf(day))}`;
 
-/** 中间线日期始终显示在输入框里，拖动或缩放后同步更新 */
-const originText = computed(() => isoOf(Math.round(logOrigin.value)));
+/** 中间线实时日期：对数模式就是基准日，线性模式取画布中心对应的日期 */
+const middleDay = computed(() => dayOfY(height.value / 2));
+
+/** 中间线日期始终显示在气泡与输入框里，拖动或缩放后同步更新 */
+const originText = computed(() => isoOf(Math.round(middleDay.value)));
 
 /** 解析 YYYY / YYYY-MM / YYYY-MM-DD；只写年份时取年中，与无日期的数据一致 */
 function parseDay(text: string): number | null {
@@ -915,12 +918,16 @@ onBeforeUnmount(() => {
         ></line>
       </svg>
 
-      <div class="axis__today" :style="{ top: `${todayY}px` }">
+      <div
+        class="axis__today"
+        :class="{ 'is-lifted': Math.abs(todayY - height / 2) < 24 }"
+        :style="{ top: `${todayY}px` }"
+      >
         <span>今天</span>
       </div>
 
       <div class="axis__midline" :style="{ top: `${height / 2}px` }">
-        <span v-if="scale === 'log'" @wheel.prevent.stop="onAxisWheel">
+        <span @wheel.prevent.stop="onAxisWheel">
           基准 {{ originText }}
         </span>
       </div>

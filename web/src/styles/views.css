@@ -337,7 +337,7 @@ body {
 }
 .axis__today span {
   position: absolute;
-  left: 14px;
+  right: 14px;
   top: 0;
   transform: translateY(-50%);
   padding: 1px 8px;
@@ -350,6 +350,8 @@ body {
   color: var(--gold);
   white-space: nowrap;
 }
+/* 与中间线气泡重合时上移，避免两个日期气泡叠在一起 */
+.axis__today.is-lifted span { transform: translateY(-150%); }
 .axis__midline {
   position: absolute;
   left: 0;
