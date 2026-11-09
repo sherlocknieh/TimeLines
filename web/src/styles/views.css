@@ -262,8 +262,10 @@ body {
   touch-action: none;
   user-select: none;
 }
+/* 抓取中的手型覆盖所有可拖区域，包括基准线气泡 */
 .axis.is-dragging,
-.axis.is-dragging .axis__band { cursor: grabbing; }
+.axis.is-dragging .axis__band,
+.axis.is-dragging .axis__midline span { cursor: grabbing; }
 
 .axis__spine {
   position: absolute;
@@ -375,7 +377,7 @@ body {
   color: var(--ink-2);
   white-space: nowrap;
   pointer-events: auto;
-  cursor: ns-resize;
+  cursor: grab;
 }
 
 .axis__links {
