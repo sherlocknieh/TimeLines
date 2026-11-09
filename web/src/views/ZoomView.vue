@@ -28,8 +28,7 @@ const AXIS_GAP = 30;
 const LABEL_HEIGHT: Record<1 | 2 | 3, number> = { 1: 28, 2: 25, 3: 25 };
 /** 画布上下留白，给最靠边的事件标签留出显示空间 */
 const PLOT_PAD = 96;
-/** 时间刻度虚线与刻度文字各自的最小像素间距，二者独立筛选 */
-const MIN_TICK_GAP = 24;
+/** 刻度文字的最小像素间距；虚线不筛，密度随对数压缩自然变化 */
 const MIN_TICK_LABEL_GAP = 52;
 /** 事件卡片的尺寸约束，展开后仍要留在画布内 */
 const CARD_MAX_WIDTH = 320;
@@ -452,7 +451,7 @@ const ticks = computed<Tick[]>(() => {
 
   if (days > YEAR_DAYS * 3) {
     const spanYears = days / YEAR_DAYS;
-    // 对数轴的远近密度差异极大：先按年份生成较细的候选刻度，再按像素间距筛选
+    // 对数轴按固定时间步长生成刻度，让虚线的疏密直接体现时间被压缩的程度
     const rawStep =
       scale.value === "log" ? Math.max(1, spanYears / 300) : (spanYears * 64) / px;
     const step =
@@ -507,17 +506,11 @@ const ticks = computed<Tick[]>(() => {
   }
 
   const kept: Tick[] = [];
-  let lastLineY = Number.NEGATIVE_INFINITY;
   let lastLabelY = Number.NEGATIVE_INFINITY;
   for (const tick of raw) {
     // 越界刻度交给 .axis 的 overflow 裁剪，不在接近边缘时提前卸载
     const y = yOfP(pOf(tick.day));
-    // 公元 0 年是纪元分界，无论间距如何都保留，避免在压缩区被筛掉
-    const isEraBoundary = tick.label === "0";
-    // 刻线只按像素间距筛选，保持均匀网格；对数轴靠近起点时候选很密
-    if (!isEraBoundary && Math.abs(y - lastLineY) < MIN_TICK_GAP) continue;
-    lastLineY = y;
-    // 标签独立按文字高度筛选，刻线不会因标签重叠而消失
+    // 虚线全部保留，密度如实反映对数轴的时间压缩；只对重叠文字做筛选
     const showLabel = Math.abs(y - lastLabelY) >= MIN_TICK_LABEL_GAP;
     if (showLabel) lastLabelY = y;
     kept.push({ ...tick, y, showLabel });
