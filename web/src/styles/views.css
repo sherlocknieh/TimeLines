@@ -197,10 +197,9 @@ body {
   background: rgb(var(--paper-rgb) / 0.84);
   backdrop-filter: blur(14px);
 }
+/* 导航与画布同宽：不设居中上限，两侧只留一点内边距 */
 .app-nav__inner {
-  max-width: 1180px;
-  margin: 0 auto;
-  padding: 9px 18px;
+  padding: 9px 16px;
   display: flex;
   align-items: center;
   gap: 16px;
