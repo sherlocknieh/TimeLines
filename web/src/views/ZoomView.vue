@@ -39,6 +39,7 @@ const UNIT_DAYS: Record<Unit, number> = {
 const UNIT_LABEL: Record<Unit, string> = { day: "天", month: "月", year: "年" };
 
 /** 时间线标题节点的上下留白：节点与轴线端部之间留一点间隙 */
+/** 起点相同的气泡之间的上下间距，用来错开叠在一起的气泡 */
 const NODE_GAP = 10;
 /** 轴线与事件标签之间的横向距离 */
 const AXIS_GAP = 16;
@@ -481,6 +482,49 @@ function fitAll() {
   for (const lane of LANE_IDS) axisOffset[lane] = offsetDefault(lane);
   selected.value = null;
   clampView();
+}
+
+/** 时间线自身区段在当前分布下的跨度，用来判断它是否已经铺满画布 */
+function laneSpan(lane: LaneId): number {
+  const { from, to } = laneBounds.value[lane];
+  return Math.abs(pOf(to) - pOf(from));
+}
+
+/** 区段占满画布高度的比例达到这个值就算已到全览，避免差几个像素时白双击一次 */
+const LANE_FIT_RATIO = 0.98;
+
+/** 这条时间线是否已经放大到全览：区段铺满画布，或视野比它更窄 */
+const laneFitted = (lane: LaneId): boolean =>
+  laneSpan(lane) >= span.value * LANE_FIT_RATIO;
+
+function fitLane(lane: LaneId) {
+  const { from, to } = laneBounds.value[lane];
+  const low = pOf(from);
+  const high = pOf(to);
+  span.value = Math.max(minSpan.value, Math.abs(high - low));
+  center.value = (low + high) / 2;
+  selected.value = null;
+  clampView();
+}
+
+/**
+ * 双击轴段逐级放大：子轴默认与父轴同列、热区互相重叠，
+ * 因此先放大命中的最外层时间线，它已经铺满画布时才落到下一层子轴。
+ */
+function onCanvasDblClick(event: MouseEvent) {
+  const target = event.target as HTMLElement | null;
+  if (target?.closest("button, a, input, label, .lane-node, .axis__midline")) {
+    return;
+  }
+  // LANES 是先序序列，父轴总排在子轴之前
+  const hits = LANES.map((item) => item.id).filter((id) =>
+    inAxisBand(id, event.clientX, event.clientY),
+  );
+  // 父轴区段包含子轴，命中列表的跨度天然由大到小：
+  // 先放大还没到全览的最外层时间线，父轴已经铺满时才落到下一层子轴；
+  // 命中的轴都已铺满时回到最外层，双击在层级之间来回切换
+  const next = hits.find((id) => !laneFitted(id)) ?? hits[0];
+  fitLane(next);
 }
 
 /** 切换坐标分布或对数单位时，保持基准日与可见跨度不变 */
@@ -1038,16 +1082,70 @@ const totals = computed<Record<LaneId, number>>(() => {
   return out;
 });
 
+/** 气泡的估算高度（收起 / 展开）、估算宽度与错开间距，只用于判断气泡是否叠在一起 */
+const NODE_HEIGHT = 30;
+const NODE_OPEN_HEIGHT = 48;
+const NODE_WIDTH_ESTIMATE = 130;
+const NODE_STACK_GAP = 6;
+
+/** 气泡当前估算高度：展开态多了起止输入那一行 */
+const nodeHeight = (lane: LaneId): number =>
+  editingLane.value === lane ? NODE_OPEN_HEIGHT : NODE_HEIGHT;
+
+/** 两条轴的气泡是否横向会撞上：只有横向重叠才需要上下避让 */
+function nodeOverlapsX(a: LaneId, b: LaneId): boolean {
+  const gap = NODE_WIDTH_ESTIMATE + 8;
+  return Math.abs(axisAt(a) - axisAt(b)) < gap;
+}
+
 /**
- * 标题气泡贴在轴线起始端的左侧，默认朝上、反向显示时朝下。
- * 气泡挂在轴左侧，右侧留给事件标签；父时间线与首个子时间线起点常常相同，
- * 父气泡再让开一段，避免两个气泡叠在一起。
+ * 气泡都骑在自己时间线的起始端上；只有起点真正重合且横向相邻时才会互相遮挡，
+ * 此时深层时间线留在起始端，父级（以及同起点的后来者）向远古方向依次让出槽位。
+ */
+const nodeSlots = computed<Record<LaneId, number>>(() => {
+  const out: Record<LaneId, number> = {};
+  const used: { lane: LaneId; base: number; y: number; height: number }[] = [];
+  // 槽位按展开态的高度留足，展开时气泡不会把后续槽位再挤开
+  const step = -(NODE_OPEN_HEIGHT + NODE_STACK_GAP) * dir.value;
+  // 深的先占位，同层按 LANES 顺序；让后来者（尤其是父级）往外让
+  const order = [...LANES].sort((a, b) => b.depth - a.depth);
+  for (const { id } of order) {
+    const base = yOfDay(laneBounds.value[id].from);
+    const height = nodeHeight(id);
+    let slot = 0;
+    // 只避让同一位置的气泡，近邻各就各位，不会连锁推挤
+    while (
+      used.some(
+        (other) =>
+          Math.abs(other.base - base) < 1 &&
+          nodeOverlapsX(other.lane, id) &&
+          Math.abs(other.y - (base + slot * step)) <
+            (other.height + height) / 2 + NODE_STACK_GAP,
+      )
+    ) {
+      slot += 1;
+    }
+    out[id] = slot;
+    used.push({ lane: id, base, y: base + slot * step, height });
+  }
+  return out;
+});
+
+/**
+ * 标题气泡在轴线起始端左侧，垂直居中骑在起始端上；重叠时向外错开槽位。
+ * 气泡挂在轴左侧，右侧留给事件标签；展开时向左生长，估算宽度只用来防止贴边溢出。
  */
 function nodeStyle(lane: LaneId): Record<string, string> {
   const startY = yOfDay(laneBounds.value[lane].from);
-  const gap = NODE_GAP + (laneParent(lane) === null ? 40 : 0);
-  // 气泡挂在轴左侧，展开时向左生长；估算宽度只用来防止贴边时溢出画布
-  const estimate = editingLane.value === lane ? 200 : 130;
+  const step = -(NODE_OPEN_HEIGHT + NODE_STACK_GAP) * dir.value;
+  const half = nodeHeight(lane) / 2;
+  const top = clamp(
+    startY + nodeSlots.value[lane] * step,
+    half + 4,
+    Math.max(half + 4, plotArea.value - half - 4),
+  );
+  const estimate =
+    editingLane.value === lane ? 200 : NODE_WIDTH_ESTIMATE;
   const right = clamp(
     width.value - axisAt(lane) + 8,
     6,
@@ -1055,7 +1153,7 @@ function nodeStyle(lane: LaneId): Record<string, string> {
   );
   return {
     right: `${right}px`,
-    top: `${startY + (dir.value > 0 ? -gap : gap)}px`,
+    top: `${top}px`,
   };
 }
 
@@ -1359,6 +1457,7 @@ onBeforeUnmount(() => {
       class="axis"
       :class="{ 'is-dragging': dragging }"
       @pointerdown="onPointerDown"
+      @dblclick="onCanvasDblClick"
       @wheel="onCanvasWheel"
     >
       <div class="axis__plot">
@@ -1437,10 +1536,7 @@ onBeforeUnmount(() => {
 
             <div
               class="lane-node"
-              :class="[
-                dir > 0 ? 'is-above' : 'is-below',
-                editingLane === lane.id ? 'is-open' : 'is-collapsed',
-              ]"
+              :class="editingLane === lane.id ? 'is-open' : 'is-collapsed'"
               :style="nodeStyle(lane.id)"
               @pointerdown.stop
             >
@@ -1568,6 +1664,7 @@ onBeforeUnmount(() => {
             <div
               class="axis__band"
               :style="bandStyle(lane.id)"
+              title="滚轮缩放，双击放大到这条时间线的全览"
               @wheel.prevent.stop="onAxisWheel"
               @pointermove="onAxisMove"
               @pointerleave="clearHover"

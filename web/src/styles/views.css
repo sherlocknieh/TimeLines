@@ -450,9 +450,10 @@ body {
   user-select: none;
 }
 
-/* 时间线标题气泡：默认贴在轴线左侧的小气泡，点开后才展开成起止编辑面板 */
+/* 时间线标题气泡：贴在轴线左侧，垂直居中骑在轴线起始端上，点开后才展开成起止编辑面板 */
 .lane-node {
   position: absolute;
+  transform: translateY(-50%);
   z-index: 7;
   display: flex;
   flex-direction: column;
@@ -467,9 +468,6 @@ body {
   white-space: nowrap;
   cursor: auto;
 }
-/* 默认在轴线起始端上方，反向显示时翻到下方 */
-.lane-node.is-above { transform: translateY(-100%); }
-.lane-node.is-below { transform: translateY(0); }
 /* 小气泡本身就是拖动抓手：整块可拖，点击展开编辑 */
 .lane-node.is-collapsed {
   padding: 0;
