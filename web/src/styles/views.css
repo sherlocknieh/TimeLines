@@ -258,9 +258,9 @@ body {
   top: calc(100% + 8px);
   right: 0;
   z-index: 70;
-  width: 148px;
+  width: 132px;
   margin: 0;
-  padding: 4px;
+  padding: 6px;
   list-style: none;
   border: 1px solid var(--line-strong);
   border-radius: 12px;
@@ -270,34 +270,27 @@ body {
     0 0 0 4px rgb(var(--surface-rgb) / 0.65);
 }
 .theme__menu li { margin: 0; }
+.theme__menu li + li { margin-top: 4px; }
+/* 每个选项就是该主题的一枚药丸：背景与文字直接用主题色，名字即预览 */
 .theme__option {
-  display: flex;
-  align-items: center;
-  gap: 8px;
   width: 100%;
-  padding: 6px 8px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--ink-2);
+  padding: 5px 12px;
+  border: 1px solid transparent;
+  border-radius: 999px;
   font: inherit;
   font-size: 0.76rem;
-  text-align: left;
+  text-align: center;
   cursor: pointer;
+  box-shadow: 0 1px 3px rgb(var(--shadow-rgb) / 0.18);
+  transition: box-shadow 0.2s, transform 0.2s;
 }
-.theme__option:hover { background: var(--surface); color: var(--ink); }
-.theme__option.is-on { color: var(--ink); font-weight: 600; }
-.theme__swatch {
-  flex: none;
-  display: inline-flex;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-}
-.theme__swatch i {
-  width: 11px;
-  height: 14px;
-  display: block;
+.theme__option:hover { transform: translateY(-1px); }
+/* 选中态用金色描边环，浅色药丸上也能看清 */
+.theme__option.is-on {
+  box-shadow:
+    0 0 0 2px var(--gold),
+    0 1px 3px rgb(var(--shadow-rgb) / 0.18);
+  font-weight: 600;
 }
 
 /* ---------- 通用视图容器 ---------- */

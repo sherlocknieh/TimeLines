@@ -114,15 +114,9 @@ onBeforeUnmount(() => {
               type="button"
               role="option"
               :aria-selected="theme === item.id"
+              :style="{ background: item.swatch[0], color: item.swatch[1] }"
               @click="pickTheme(item.id)"
             >
-              <span class="theme__swatch" aria-hidden="true">
-                <i
-                  v-for="(color, index) in item.swatch"
-                  :key="index"
-                  :style="{ background: color }"
-                ></i>
-              </span>
               {{ item.label }}
             </button>
           </li>
