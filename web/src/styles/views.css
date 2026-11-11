@@ -242,7 +242,7 @@ body {
 }
 
 /* ---------- 缩放时间轴 ---------- */
-/* 画布只负责摆放两条时间线，纵向映射与交互都在各自面板内完成 */
+/* 一个面板容纳所有时间线：时间视野共用，每条时间线只占一列 */
 .axis {
   position: relative;
   flex: 1 1 auto;
@@ -256,57 +256,89 @@ body {
   user-select: none;
 }
 
-/* 一条时间线：英国史与美国史各占一个面板，共用同一套时间视野 */
-.panel {
-  position: absolute;
-  overflow: hidden;
-  /* 建立独立的层叠上下文：虚线网格固定在 z-index 0 当背景，内容层从 1 起，虚线永不遮挡元素 */
-  isolation: isolate;
-  background:
-    radial-gradient(520px 420px at 50% 50%, #fffdf8 0%, transparent 74%),
-    linear-gradient(180deg, #fffdf9, #faf5e9);
-}
-/* 并排时用一条细线分隔两条时间线 */
-.axis:not(.is-stacked) .panel.is-us {
-  border-left: 1px solid var(--line-soft);
-}
-.axis.is-stacked .panel.is-us {
-  border-top: 1px solid var(--line-soft);
-}
-
-.panel__title {
+/* 一条时间线：列宽由时间线数量平分，缺省色供新增时间线使用 */
+.lane {
+  --lane: var(--ink-3);
   position: absolute;
   top: 0;
-  left: 14px;
-  align-items: center;
-  z-index: 8;
-  display: flex;
-  gap: 7px;
-  margin: 0;
-  pointer-events: none;
-}
-
-/* 绘图区：面板去掉表头后的部分，内部坐标都相对它计算 */
-.panel__plot {
-  position: absolute;
-  inset: 0;
+  bottom: 0;
   overflow: hidden;
-  isolation: isolate;
+  border-left: 1px solid var(--line-soft);
 }
-.panel__title b {
+.lane:first-child { border-left: 0; }
+.lane.is-uk { --lane: var(--uk); }
+.lane.is-us { --lane: var(--us); }
+
+/* 列头：名称与起止都可直接改写，事件数随范围实时变化 */
+.lane__head {
+  position: absolute;
+  inset: 0 0 auto 0;
+  z-index: 8;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+  align-content: center;
+  gap: 1px 8px;
+  padding: 4px 12px;
+  background: linear-gradient(180deg, rgba(255, 253, 247, 0.94), rgba(251, 246, 233, 0.6));
+}
+.lane__name {
+  min-width: 0;
+  padding: 1px 4px;
+  border: 1px solid transparent;
+  border-bottom: 1px dashed var(--line-soft);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--lane);
   font-family: var(--serif);
   font-size: 0.92rem;
   font-weight: 600;
   letter-spacing: 0.02em;
 }
-.panel__title span {
+.lane__count {
+  align-self: center;
   font-family: var(--mono);
   font-size: 0.6rem;
   letter-spacing: 0.06em;
   color: var(--ink-3);
 }
-.panel.is-uk .panel__title b { color: var(--uk); }
-.panel.is-us .panel__title b { color: var(--us); }
+.lane__edge-group {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  color: var(--ink-3);
+}
+.lane__edge {
+  width: 76px;
+  min-width: 0;
+  padding: 1px 4px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(255, 253, 247, 0.8);
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 0.6rem;
+}
+.lane__edge::placeholder { color: var(--ink-3); }
+.lane__name:hover,
+.lane__edge:hover { border-color: var(--line); }
+.lane__name:focus,
+.lane__edge:focus {
+  outline: none;
+  border-color: #c3b398;
+  background: var(--paper-2);
+}
+
+/* 绘图区：列去掉列头后的部分，内部坐标都相对它计算 */
+.lane__plot {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  isolation: isolate;
+}
 
 /* 抓取中的手型覆盖所有可拖区域，包括基准线气泡 */
 .axis.is-dragging,
@@ -315,8 +347,6 @@ body {
 
 .axis__spine {
   position: absolute;
-  top: 0;
-  bottom: 0;
   width: 2px;
   margin-left: -1px;
   background: linear-gradient(
@@ -433,14 +463,12 @@ body {
   overflow: visible;
   pointer-events: none;
 }.axis__links line { stroke-width: 1; }
-.axis__links line.uk { stroke: rgba(157, 34, 53, 0.3); }
-.axis__links line.us { stroke: rgba(31, 63, 122, 0.3); }
+.axis__links line { stroke: var(--lane); stroke-opacity: 0.3; }
 .axis__links line.axis__range {
   stroke-width: 4;
   stroke-linecap: round;
 }
-.axis__links line.axis__range.uk { stroke: rgba(157, 34, 53, 0.42); }
-.axis__links line.axis__range.us { stroke: rgba(31, 63, 122, 0.42); }
+.axis__links line.axis__range { stroke-opacity: 0.42; }
 
 .axis-event__dot {
   position: absolute;
@@ -452,8 +480,7 @@ body {
   box-shadow: 0 0 0 3px rgba(251, 246, 233, 0.95);
   pointer-events: none;
 }
-.axis-event__dot.is-uk { background: var(--uk); }
-.axis-event__dot.is-us { background: var(--us); }
+.axis-event__dot { background: var(--lane); }
 .axis-event__dot.is-l1 {
   width: 9px;
   height: 9px;
@@ -466,6 +493,7 @@ body {
   align-items: baseline;
   gap: 6px;
   max-width: 230px;
+  min-width: 0;
   padding: 2px 9px;
   border: 1px solid var(--line);
   border-left-width: 3px;
@@ -479,8 +507,7 @@ body {
   cursor: pointer;
   transition: background 0.2s, box-shadow 0.2s, transform 0.2s;
 }
-.axis-event__label.is-uk { border-left-color: var(--uk); }
-.axis-event__label.is-us { border-left-color: var(--us); }
+.axis-event__label { border-left-color: var(--lane); }
 .axis-event__label b {
   font-family: var(--mono);
   font-size: 0.65rem;
@@ -488,6 +515,7 @@ body {
   color: var(--ink);
 }
 .axis-event__label span {
+  min-width: 0;
   max-width: 160px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -524,8 +552,7 @@ body {
   user-select: text;
   animation: card-in 0.18s ease-out;
 }
-.axis-event__card.is-uk { border-left-color: var(--uk); }
-.axis-event__card.is-us { border-left-color: var(--us); }
+.axis-event__card { border-left-color: var(--lane); }
 .axis-event__meta {
   margin: 0 0 5px;
   font-family: var(--mono);
@@ -754,6 +781,9 @@ body {
   .search { flex: 1 1 120px; width: auto; min-width: 96px; }
   .axis-event__label { max-width: 156px; font-size: 0.66rem; }
   .axis-event__label span { max-width: 92px; }
+  .lane__head { padding: 4px 8px; gap: 1px 6px; }
+  .lane__name { font-size: 0.82rem; }
+  .lane__edge { width: 62px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

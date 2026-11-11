@@ -1,10 +1,11 @@
-export type Side = "uk" | "us";
+/** 时间线 id：每条时间线一个泳道，取值由 lib/dataset.ts 的 LANES 定义 */
+export type LaneId = string;
 
 export interface TimelineEvent {
   /** 年份；区间事件取起始年 */
   y: number;
-  /** 阵营，缺省为美国 */
-  s?: Side;
+  /** 所属时间线，缺省落到 LANES 的第一条 */
+  s?: LaneId;
   /** 分类标签 */
   tag: string;
   /** 标题 */
