@@ -395,8 +395,8 @@ const plotHeight = computed(() =>
   Math.max(1, plotArea.value - plotPad.value * 2),
 );
 
-/** 基准线所在高度：始终画在选中日期上，随内容平移、缩放与反向移动 */
-const midY = computed(() => yOfDay(logOrigin.value));
+/** 基准日所在的原始高度：始终对应选中日期，随内容平移、缩放与反向移动 */
+const midRawY = computed(() => yOfDay(logOrigin.value));
 
 /** 纵向映射在整块画布里统一进行，所有时间线共用 */
 const yOfP = (position: number) =>
@@ -409,6 +409,25 @@ const pOfY = (y: number) =>
   dir.value * (((y - plotPad.value) / plotHeight.value - 0.5) * span.value);
 
 const yOfDay = (day: number) => yOfP(pOf(day));
+
+/**
+ * 纵向坐标的绘制边界：画布上下各留一屏，越界部分由 .axis 的 overflow 裁掉。
+ * 放大到极深时日期换算出的像素会到上千万，超过浏览器图层上限后元素不再绘制；
+ * 先收到边界内，元素的可见部分与原来一致。
+ */
+const clipYValue = (y: number): number =>
+  clamp(y, -plotArea.value, plotArea.value * 2);
+
+/** 基准线的绘制高度：收进绘制边界，标题与拖动判定都用它 */
+const midY = computed(() => clipYValue(midRawY.value));
+
+/** 把一段纵向跨度夹到绘制边界内 */
+function clipY(a: number, b: number): { top: number; height: number } {
+  const top = clipYValue(Math.min(a, b));
+  const bottom = clipYValue(Math.max(a, b));
+  return { top, height: Math.max(0, bottom - top) };
+}
+
 const dayOfY = (y: number) => fromP(pOfY(y));
 
 const dayStart = computed(() => fromP(center.value - span.value / 2));
@@ -568,7 +587,7 @@ const isoOf = (day: number) =>
   `${yearOf(day)}-${pad(monthOf(day))}-${pad(dateOf(day))}`;
 
 /** 基准线上实时显示的日期，也就是当前选中的基准日 */
-const middleDay = computed(() => dayOfY(midY.value));
+const middleDay = computed(() => dayOfY(midRawY.value));
 
 /** 基准线日期始终显示在气泡与输入框里，拖动或缩放后同步更新 */
 const originText = computed(() => isoOf(Math.round(middleDay.value)));
@@ -1011,8 +1030,7 @@ const links = computed<Record<LaneId, { id: number; y: number; x1: number; x2: n
       const x1 = axisAt(lane);
       const x2 = x1 + (labelSide(lane) === "left" ? -AXIS_GAP : AXIS_GAP);
       for (const event of placed.value[lane]) {
-        const y = clipYValue(event.anchor);
-        out[lane].push({ id: event.id, y, x1, x2 });
+        out[lane].push({ id: event.id, y: clipYValue(event.anchor), x1, x2 });
       }
     }
 
@@ -1069,7 +1087,7 @@ const branches = computed(() => {
       id: lane.id,
       x1: axisAt(parent),
       x2: axisAt(lane.id),
-      y: yOfDay(laneBounds.value[lane.id].from),
+      y: clipYValue(yOfDay(laneBounds.value[lane.id].from)),
     });
   }
   return out;
@@ -1178,21 +1196,6 @@ const nodeLinks = computed(() =>
     y: nodeCenterY(id),
   })),
 );
-
-/**
- * 纵向坐标的绘制边界：远在画布之外，越界部分由 .axis 的 overflow 裁掉。
- * 放大到极深时日期换算出的像素会到上千万，超过浏览器图层上限后元素不再绘制；
- * 先收到这个边界内，元素的可见部分与原来一致。
- */
-const CLIP_LIMIT = 20_000;
-const clipYValue = (y: number): number => clamp(y, -CLIP_LIMIT, CLIP_LIMIT);
-
-/** 把一段纵向跨度夹到绘制边界内 */
-function clipY(a: number, b: number): { top: number; height: number } {
-  const top = clipYValue(Math.min(a, b));
-  const bottom = clipYValue(Math.max(a, b));
-  return { top, height: Math.max(0, bottom - top) };
-}
 
 /** 轴线热区的纵向范围：与轴线等长，只覆盖这条时间线的起止区段 */
 function axisBand(lane: LaneId): { top: number; height: number } {
@@ -1415,12 +1418,12 @@ function labelStyle(event: Placed) {
     ...(left
       ? { right: `${width.value - x + AXIS_GAP}px` }
       : { left: `${x + AXIS_GAP}px` }),
-    top: `${event.labelTop}px`,
+    top: `${clipYValue(event.labelTop)}px`,
     maxWidth: `${Math.max(80, labelWidth(event))}px`,
   };
 }
 
-const todayY = computed(() => yOfDay(todayDay));
+const todayY = computed(() => clipYValue(yOfDay(todayDay)));
 
 const hoverText = computed(() => {
   if (!hover.value) return null;
@@ -1653,7 +1656,7 @@ onBeforeUnmount(() => {
               <span
                 class="axis-event__dot"
                 :class="{ 'is-l1': event.lvl === 1 }"
-                :style="{ left: `${axisAt(lane.id)}px`, top: `${event.anchor}px` }"
+                :style="{ left: `${axisAt(lane.id)}px`, top: `${clipYValue(event.anchor)}px` }"
               ></span>
               <div
                 v-if="selected === event.id"
