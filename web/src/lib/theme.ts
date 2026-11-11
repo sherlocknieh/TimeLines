@@ -5,16 +5,16 @@ export type ThemeId = "paper" | "ink" | "celadon" | "dusk";
 export interface Theme {
   id: ThemeId;
   label: string;
-  /** 主题色板，用于切换器里的预览圆点 */
-  swatch: [string, string, string];
+  /** 预览色板：背景色与文字色，用于切换器里的两色圆点 */
+  swatch: [string, string];
 }
 
 /** 主题清单：新增主题时在这里登记，并在 views.css 补一组同名变量 */
 export const THEMES: Theme[] = [
-  { id: "paper", label: "纸本", swatch: ["#f4efe4", "#9d2235", "#1f3f7a"] },
-  { id: "ink", label: "墨夜", swatch: ["#14120f", "#d95f6b", "#6f9be0"] },
-  { id: "celadon", label: "青瓷", swatch: ["#eef2ee", "#a34a4a", "#2f6f6a"] },
-  { id: "dusk", label: "暮蓝", swatch: ["#101722", "#e07a86", "#6fa8e8"] },
+  { id: "paper", label: "纸本", swatch: ["#f4efe4", "#221d17"] },
+  { id: "ink", label: "墨夜", swatch: ["#14120f", "#f2ece0"] },
+  { id: "celadon", label: "青瓷", swatch: ["#eef2ee", "#1b2420"] },
+  { id: "dusk", label: "暮蓝", swatch: ["#101722", "#e8eef7"] },
 ];
 
 /** 与 index.html 的首屏脚本共用同一个键，避免加载时闪一下默认主题 */
