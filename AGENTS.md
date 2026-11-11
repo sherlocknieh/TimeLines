@@ -19,6 +19,7 @@ TimeLines 是一个通用的时间线整理与可视化工具。仓库同时生�
 | 加减事件、改数据字段 | `web/src/data/events.ts` |
 | 增减时间线、改默认名称与起止 | `web/src/lib/dataset.ts` 的 `LANES` |
 | 改标签遮挡筛选 | `web/src/lib/timeline.ts` |
+| 改配色或新增主题 | `web/src/styles/views.css` 的主题变量组 + `web/src/lib/theme.ts` 的 `THEMES` |
 | 改文档内容 | `docs/*.mdx`，Blume 按文件树自动生成路由与侧边栏 |
 | 改开发/构建流程 | `.dev/*.mjs`、`blume.config.ts`、`web/vite.config.ts` |
 
@@ -28,14 +29,15 @@ TimeLines 是一个通用的时间线整理与可视化工具。仓库同时生�
 docs/                     Blume 文档内容
 web/src/
 ├── main.ts               挂载 Vue、注入路由与全局样式
-├── App.vue               应用外壳：品牌、阅读进度、回到顶部
+├── App.vue               应用外壳：品牌、主题切换、阅读进度、回到顶部
 ├── router.ts             hash 路由，只有缩放轴一条视图
 ├── views/
 │   └── ZoomView.vue      竖向缩放轴及其全部交互
 ├── data/events.ts        唯一 demo 数据源
 ├── lib/dataset.ts        时间线清单（LANES）与 clamp 等通用工具
 ├── lib/timeline.ts       标签遮挡筛选 pickVisible
-└── styles/views.css      全局基础样式、外壳与缩放轴样式
+├── lib/theme.ts          配色主题清单、切换与持久化
+└── styles/views.css      全局基础样式、主题变量、外壳与缩放轴样式
 ```
 
 开发与构建管线：
@@ -68,6 +70,7 @@ web/src/
 | 新增一个视图 | `views/` 新组件 + `router.ts` + `docs/views.mdx` + `styles/views.css` |
 | 新增/删除事件 | `data/events.ts`；若总数变化，搜索并更新文案里的事件总数 |
 | 新增共享派生数据 | `lib/dataset.ts` |
+| 新增配色主题 | `styles/views.css` 补一组 `:root[data-theme="…"]` 变量 + `lib/theme.ts` 的 `THEMES` 登记 |
 | 文档新增页面 | `docs/` 新 MDX，front matter 至少 `title`、`description` |
 | 调整 `/TimeLines/` 挂载 | `blume.config.ts` 的 `DEPLOY_BASE`、`web/vite.config.ts` 的 `base`、`.dev/preview.mjs` 的 `BASE_PATH` 三处一起改，并同步文档里的绝对链接 |
 
@@ -82,6 +85,7 @@ web/src/
 - **事件卡片在原地展开**：点选气泡后，卡片取代气泡显示在同一位置，垂直居中于事件锚点并夹在画布内；点空白处、关闭按钮或 `Esc` 收起。不要再把详情放回画布下方。
 - **标签只做遮挡筛选，不做位移**：`pickVisible` 返回与输入顺序一致的可见标记；标签始终落在真实日期的锚点上，与轴线之间保留水平连线，改它之前先看 `ZoomView.vue` 的 `placed` 计算。
 - **滚出画布的元素交给裁剪**：标签与「今天」标记不因越界而卸载，由 `.axis__plot` 的 `overflow: hidden` 自然遮挡；滚动时不要用 `v-if` 让它们突然消失（「今天」是整块画布共用的参考线，不随单条时间线的起止隐藏）。
+- **配色只走语义变量**：组件样式不写具体色号，颜色一律取 `views.css` 里的 `--paper`、`--surface`、`--ink`、`--line`、`--uk`、`--us`、`--gold` 等变量；新增主题只补一组同名变量，不改组件。
 - **文档站不加载外部字体**：`blume.config.ts` 的 `theme: { fonts: false }` 让样式回落到系统字体栈，构建不访问 Google Fonts。该开关由 `patches/blume@1.7.3.patch` 提供，升级 Blume 时要重新打补丁并验证构建日志里不再出现字体抓取。
 
 ## 验证

@@ -4,7 +4,15 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>TimeLines · 时间线可视化</title>
-<script>document.documentElement.classList.add('js');</script>
+<script>
+  // 首屏前定好主题，避免默认配色闪一下再切到用户选择
+  (function () {
+    var saved = localStorage.getItem('timelines:theme');
+    var dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    document.documentElement.dataset.theme = saved || (dark ? 'ink' : 'paper');
+    document.documentElement.classList.add('js');
+  })();
+</script>
 </head>
 <body>
 <div id="app"></div>
