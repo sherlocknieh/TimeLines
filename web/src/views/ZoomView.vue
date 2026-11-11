@@ -1011,7 +1011,8 @@ const links = computed<Record<LaneId, { id: number; y: number; x1: number; x2: n
       const x1 = axisAt(lane);
       const x2 = x1 + (labelSide(lane) === "left" ? -AXIS_GAP : AXIS_GAP);
       for (const event of placed.value[lane]) {
-        out[lane].push({ id: event.id, y: event.anchor, x1, x2 });
+        const y = clipYValue(event.anchor);
+        out[lane].push({ id: event.id, y, x1, x2 });
       }
     }
 
@@ -1035,8 +1036,8 @@ const ranges = computed<Record<LaneId, { id: number; x: number; y1: number; y2: 
         out[lane].push({
           id: event.id,
           x,
-          y1: yOfDay(event.day),
-          y2: yOfDay(event.endDay),
+          y1: clipYValue(yOfDay(event.day)),
+          y2: clipYValue(yOfDay(event.endDay)),
         });
       }
     }
@@ -1094,9 +1095,12 @@ const NODE_STACK_GAP = 8;
 const nodeHeight = (lane: LaneId): number =>
   editingLane.value === lane ? NODE_OPEN_HEIGHT : NODE_HEIGHT;
 
-/** 气泡的右边缘：默认贴在轴左侧 8px，槽位每加一格再向左让一个气泡宽度 */
+/** 气泡与轴线之间的横向距离，和事件标签一致，留给连接线 */
+const NODE_OFFSET = AXIS_GAP;
+
+/** 气泡的右边缘：默认贴在轴左侧一段距离，槽位每加一格再向左让一个气泡宽度 */
 const nodeRight = (lane: LaneId, slot: number): number =>
-  axisAt(lane) - 8 - slot * (NODE_WIDTH_ESTIMATE + NODE_STACK_GAP);
+  axisAt(lane) - NODE_OFFSET - slot * (NODE_WIDTH_ESTIMATE + NODE_STACK_GAP);
 
 /**
  * 气泡都骑在自己时间线的起始端上，默认贴轴左侧。
@@ -1131,30 +1135,63 @@ const nodeSlots = computed<Record<LaneId, number>>(() => {
   return out;
 });
 
+/** 气泡的估算宽度：展开态要宽一些，只用于贴边时收住位置 */
+const nodeWidthEstimate = (lane: LaneId): number =>
+  editingLane.value === lane ? 200 : NODE_WIDTH_ESTIMATE;
+
+/** 气泡在画布上的纵向中心：起始端太靠边时夹在画布内 */
+function nodeCenterY(lane: LaneId): number {
+  const half = nodeHeight(lane) / 2;
+  return clamp(
+    yOfDay(laneBounds.value[lane].from),
+    half + 4,
+    Math.max(half + 4, plotArea.value - half - 4),
+  );
+}
+
+/** 气泡右边缘的画布横坐标：横向让位后仍要留在画布内 */
+function nodeRightX(lane: LaneId): number {
+  return clamp(
+    nodeRight(lane, nodeSlots.value[lane]),
+    6,
+    Math.max(6, width.value - 6 - nodeWidthEstimate(lane)),
+  );
+}
+
 /**
  * 标题气泡在轴线起始端左侧，垂直居中骑在起始端上；起点重合时向左错开。
  * 展开时气泡向左生长，估算宽度只用来防止贴边溢出画布。
  */
 function nodeStyle(lane: LaneId): Record<string, string> {
-  const startY = yOfDay(laneBounds.value[lane].from);
-  const half = nodeHeight(lane) / 2;
-  const top = clamp(
-    startY,
-    half + 4,
-    Math.max(half + 4, plotArea.value - half - 4),
-  );
-  const estimate =
-    editingLane.value === lane ? 200 : NODE_WIDTH_ESTIMATE;
-  // 向左让到位后仍要留在画布内，贴左边缘时允许槽位被压缩
-  const right = clamp(
-    width.value - nodeRight(lane, nodeSlots.value[lane]),
-    6,
-    Math.max(6, width.value - 6 - estimate),
-  );
   return {
-    right: `${right}px`,
-    top: `${top}px`,
+    right: `${width.value - nodeRightX(lane)}px`,
+    top: `${nodeCenterY(lane)}px`,
   };
+}
+
+/** 标题气泡与轴线的连接线：与事件标签的连线同一种画法 */
+const nodeLinks = computed(() =>
+  LANES.map(({ id }) => ({
+    id: id,
+    x1: nodeRightX(id),
+    x2: axisAt(id),
+    y: nodeCenterY(id),
+  })),
+);
+
+/**
+ * 纵向坐标的绘制边界：远在画布之外，越界部分由 .axis 的 overflow 裁掉。
+ * 放大到极深时日期换算出的像素会到上千万，超过浏览器图层上限后元素不再绘制；
+ * 先收到这个边界内，元素的可见部分与原来一致。
+ */
+const CLIP_LIMIT = 20_000;
+const clipYValue = (y: number): number => clamp(y, -CLIP_LIMIT, CLIP_LIMIT);
+
+/** 把一段纵向跨度夹到绘制边界内 */
+function clipY(a: number, b: number): { top: number; height: number } {
+  const top = clipYValue(Math.min(a, b));
+  const bottom = clipYValue(Math.max(a, b));
+  return { top, height: Math.max(0, bottom - top) };
 }
 
 /** 轴线热区的纵向范围：与轴线等长，只覆盖这条时间线的起止区段 */
@@ -1165,7 +1202,8 @@ function axisBand(lane: LaneId): { top: number; height: number } {
   const span = Math.abs(b - a);
   // 轴段被视野压得比最小热区还短时，围绕轴段中心向外补足
   const height = Math.max(AXIS_BAND_MIN, span);
-  return { top: Math.min(a, b) - (height - span) / 2, height };
+  const top = Math.min(a, b) - (height - span) / 2;
+  return clipY(top, top + height);
 }
 
 /** 指针是否落在某条轴线的热区内：横向贴轴、纵向落在轴段上 */
@@ -1184,12 +1222,11 @@ function inAxisBand(lane: LaneId, clientX: number, clientY: number): boolean {
 /** 轴线只画在时间线的起止范围内，两端实心结束 */
 function spineStyle(lane: LaneId) {
   const { from, to } = laneBounds.value[lane];
-  const a = yOfDay(from);
-  const b = yOfDay(to);
+  const { top, height } = clipY(yOfDay(from), yOfDay(to));
   return {
     left: `${axisAt(lane)}px`,
-    top: `${Math.min(a, b)}px`,
-    height: `${Math.abs(b - a)}px`,
+    top: `${top}px`,
+    height: `${height}px`,
   };
 }
 
@@ -1485,6 +1522,16 @@ onBeforeUnmount(() => {
             :x2="branch.x2"
             :y1="branch.y"
             :y2="branch.y"
+          ></line>
+          <line
+            v-for="node in nodeLinks"
+            :key="`node-link-${node.id}`"
+            class="axis__link"
+            :style="{ stroke: laneColor(node.id) }"
+            :x1="node.x1"
+            :x2="node.x2"
+            :y1="node.y"
+            :y2="node.y"
           ></line>
           <line
             v-for="range in allRanges"
