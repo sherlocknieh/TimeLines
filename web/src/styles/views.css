@@ -256,81 +256,86 @@ body {
   user-select: none;
 }
 
-/* 顶部时间线栏：每条时间线一枚标签，名称与起止都可直接改写 */
-.axis__head {
+/* 时间线标题节点：贴在轴线起始端，本身就是一个可改写的标题 */
+.lane-node {
   position: absolute;
-  inset: 0 0 auto 0;
-  z-index: 9;
+  z-index: 7;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 0 12px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  border-bottom: 1px solid var(--line-soft);
-  background: linear-gradient(180deg, rgba(255, 253, 247, 0.94), rgba(251, 246, 233, 0.7));
+  gap: 3px;
+  padding: 4px 10px 5px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--lane);
+  border-radius: 999px;
+  background: #fffdf7;
+  box-shadow: 0 10px 22px -20px rgba(70, 50, 20, 0.9);
+  white-space: nowrap;
+  transform: translateX(-50%);
   cursor: auto;
 }
-.lane-chip {
-  --lane: var(--ink-3);
-  flex: none;
+/* 默认在轴线起始端上方，反向显示时翻到下方 */
+.lane-node.is-above { transform: translate(-50%, -100%); }
+.lane-node.is-below { transform: translate(-50%, 0); }
+.lane-node__head {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 6px;
-  padding: 2px 8px 2px 4px;
-  border: 1px solid var(--line-soft);
-  border-radius: 10px;
-  background: rgba(255, 253, 247, 0.7);
 }
-.lane-chip.is-uk { --lane: var(--uk); }
-.lane-chip.is-us { --lane: var(--us); }
-.lane-chip__name {
-  width: 5.5em;
+.lane-node__name {
+  width: 5.6em;
   min-width: 0;
-  padding: 1px 4px;
-  border: 1px solid transparent;
-  border-bottom: 1px dashed var(--line-soft);
-  border-radius: 6px;
+  padding: 0 2px;
+  border: 0;
+  border-bottom: 1px dashed transparent;
   background: transparent;
   color: var(--lane);
   font-family: var(--serif);
   font-size: 0.86rem;
   font-weight: 600;
   letter-spacing: 0.02em;
+  text-align: center;
 }
-.lane-chip__count {
+.lane-node__name:hover,
+.lane-node__name:focus {
+  outline: none;
+  border-bottom-color: var(--line);
+  background: var(--paper-2);
+}
+.lane-node__count {
   font-family: var(--mono);
-  font-size: 0.6rem;
+  font-size: 0.58rem;
   letter-spacing: 0.06em;
   color: var(--ink-3);
 }
-.lane-chip__edges {
-  display: flex;
+/* 起止只在悬停或聚焦时展开，平时保持标题节点的轻量 */
+.lane-node__edges {
+  display: none;
   align-items: center;
   gap: 3px;
   font-family: var(--mono);
-  font-size: 0.6rem;
+  font-size: 0.58rem;
   color: var(--ink-3);
 }
-.lane-chip__edge {
-  width: 68px;
+.lane-node:hover .lane-node__edges,
+.lane-node:focus-within .lane-node__edges {
+  display: flex;
+}
+.lane-node__edge {
+  width: 64px;
   min-width: 0;
-  padding: 1px 4px;
+  padding: 0 3px;
   border: 1px solid var(--line);
-  border-radius: 6px;
-  background: rgba(255, 253, 247, 0.8);
+  border-radius: 5px;
+  background: var(--paper-2);
   color: var(--ink-2);
   font-family: var(--mono);
-  font-size: 0.6rem;
+  font-size: 0.58rem;
 }
-.lane-chip__edge::placeholder { color: var(--ink-3); }
-.lane-chip__name:hover,
-.lane-chip__edge:hover { border-color: var(--line); }
-.lane-chip__name:focus,
-.lane-chip__edge:focus {
+.lane-node__edge::placeholder { color: var(--ink-3); }
+.lane-node__edge:focus {
   outline: none;
   border-color: #c3b398;
-  background: var(--paper-2);
 }
 
 /* 绘图区：顶部栏下方的统一空间，所有时间线共用同一套坐标 */
@@ -354,17 +359,14 @@ body {
 .axis.is-dragging .axis__band,
 .axis.is-dragging .axis__midline span { cursor: grabbing; }
 
+/* 轴线覆盖且只覆盖这条时间线的起止区段，两端实心结束、不做渐变 */
 .axis__spine {
   position: absolute;
   width: 2px;
   margin-left: -1px;
-  background: linear-gradient(
-    180deg,
-    rgba(200, 185, 156, 0),
-    #c8b99c 4%,
-    #c8b99c 96%,
-    rgba(200, 185, 156, 0)
-  );
+  border-radius: 1px;
+  background: var(--lane);
+  opacity: 0.6;
   z-index: 1;
 }
 
@@ -790,9 +792,9 @@ body {
   .search { flex: 1 1 120px; width: auto; min-width: 96px; }
   .axis-event__label { max-width: 156px; font-size: 0.66rem; }
   .axis-event__label span { max-width: 92px; }
-  .axis__head { padding: 0 8px; gap: 6px; }
-  .lane-chip__name { width: 4.4em; font-size: 0.8rem; }
-  .lane-chip__edge { width: 56px; }
+  .lane-node { padding: 3px 8px 4px; }
+  .lane-node__name { width: 4.6em; font-size: 0.8rem; }
+  .lane-node__edge { width: 54px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

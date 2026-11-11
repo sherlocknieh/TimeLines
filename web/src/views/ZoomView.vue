@@ -35,8 +35,8 @@ const UNIT_DAYS: Record<Unit, number> = {
 };
 const UNIT_LABEL: Record<Unit, string> = { day: "天", month: "月", year: "年" };
 
-/** 顶部时间线栏高度：放各线名称与起止，绘图区从它下方开始 */
-const TOP_BAR = 46;
+/** 时间线标题节点的上下留白：节点与轴线端部之间留一点间隙 */
+const NODE_GAP = 10;
 /** 轴线与事件标签之间的横向距离 */
 const AXIS_GAP = 30;
 /** 区间线段与轴线的横向偏移，落在标签连线内侧 */
@@ -184,14 +184,33 @@ function parseLaneEdge(text: string, edge: "start" | "end"): number | null {
   return utcDay(year, month, clamp(Number(match[3]), 1, 31));
 }
 
-/** 每条时间线覆盖的日期区间；未设置的一端一直延伸到数据边界 */
+/** 每条时间线自身事件的范围，作为未手动设定起止时的默认区段 */
+const laneDefaults = computed<Record<LaneId, { from: number; to: number }>>(() => {
+  const out = byLane(() => ({ from: DATA_MAX, to: DATA_MIN }));
+  const seen: Record<LaneId, boolean> = byLane(() => false);
+  for (const event of events) {
+    const end = event.endDay ?? event.day;
+    const range = out[event.lane];
+    range.from = Math.min(range.from, event.day);
+    range.to = Math.max(range.to, end);
+    seen[event.lane] = true;
+  }
+  // 没有任何事件的时间线退回整段数据范围，至少能看出轴线位置
+  for (const lane of LANE_IDS) {
+    if (!seen[lane]) out[lane] = { from: DATA_MIN, to: DATA_MAX };
+  }
+  return out;
+});
+
+/** 每条时间线实际展示的日期区段：手动起止优先，否则取自身事件范围 */
 const laneBounds = computed<Record<LaneId, { from: number; to: number }>>(() => {
   const out = byLane(() => ({ from: DATA_MIN, to: DATA_MAX }));
   for (const lane of lanes) {
+    const fallback = laneDefaults.value[lane.id];
     const from = lane.start ? parseLaneEdge(lane.start, "start") : null;
     const to = lane.end ? parseLaneEdge(lane.end, "end") : null;
-    const start = clamp(from ?? DATA_MIN, DATA_MIN, DATA_MAX);
-    const stop = clamp(to ?? DATA_MAX, DATA_MIN, DATA_MAX);
+    const start = clamp(from ?? fallback.from, DATA_MIN, DATA_MAX);
+    const stop = clamp(to ?? fallback.to, DATA_MIN, DATA_MAX);
     out[lane.id] = {
       from: Math.min(start, stop),
       to: Math.max(start, stop),
@@ -297,8 +316,8 @@ function fromP(position: number): number {
   return logOrigin.value + offsetOfP(position);
 }
 
-/** 绘图区高度：面板去掉顶部时间线栏后的部分 */
-const plotArea = computed(() => Math.max(1, height.value - TOP_BAR));
+/** 绘图区高度：整块画布都用于绘制 */
+const plotArea = computed(() => Math.max(1, height.value));
 
 /** 绘图区上下留白：面板变矮时同步收窄，避免留白吃掉可视高度 */
 const plotPad = computed(() => Math.min(PLOT_PAD, plotArea.value * 0.18));
@@ -474,7 +493,7 @@ function laneAt(
 /** 把视口坐标换算成画布内的纵向坐标 */
 function localY(clientY: number): number {
   const rect = viewport.value?.getBoundingClientRect();
-  return clientY - (rect?.top ?? 0) - TOP_BAR;
+  return clientY - (rect?.top ?? 0);
 }
 
 function zoomAt(factor: number, y: number) {
@@ -498,8 +517,8 @@ function onAxisWheel(event: WheelEvent) {
 
 /** 轴线热区之外：滚轮平移时间 */
 function onCanvasWheel(event: WheelEvent) {
-  // 顶部时间线栏自己横向滚动，不抢占成时间平移
-  if ((event.target as HTMLElement | null)?.closest(".axis__head, input")) return;
+  // 事件标签与标题节点里的输入自己处理滚轮，不抢占成时间平移
+  if ((event.target as HTMLElement | null)?.closest(".lane-node, input")) return;
   event.preventDefault();
   const scaleBy =
     event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? plotHeight.value : 1;
@@ -549,7 +568,7 @@ function onPointerMove(event: PointerEvent) {
   } else if (drag.mode === "mid") {
     // 基准线搬到指针处并选中该日期：按拖拽起点的布局换算，避免逐帧叠加失真
     const ratio = clamp(
-      (event.clientY - drag.top - TOP_BAR - plotPad.value) /
+      (event.clientY - drag.top - plotPad.value) /
         plotHeight.value,
       0.05,
       0.95,
@@ -585,7 +604,7 @@ function onPointerDown(event: PointerEvent) {
   // 每次重新按下都是一次新手势，避免上一次拖拽的 moved 标记吞掉气泡点击
   moved = false;
   const target = event.target as HTMLElement | null;
-  if (target?.closest("button, a, input, label, .axis__head")) return;
+  if (target?.closest("button, a, input, label, .lane-node")) return;
 
   // 指针落在哪条时间线上，就只拖动那条线的轴线
   const lane = laneAt(target, event.clientX, event.clientY);
@@ -594,7 +613,7 @@ function onPointerDown(event: PointerEvent) {
   // 基准线在两种分布下都可抓取：气泡本身或线上下几条像素
   const onMidline =
     Boolean(target?.closest(".axis__midline")) ||
-    Math.abs(event.clientY - top - TOP_BAR - midY.value) <= 8;
+    Math.abs(event.clientY - top - midY.value) <= 8;
 
   selected.value = null;
   drag = {
@@ -862,7 +881,16 @@ const totals = computed<Record<LaneId, number>>(() => {
   return out;
 });
 
-/** 轴线只画在时间线的起止范围内，两端留白即表示不覆盖的时段 */
+/** 标题节点贴在轴线的起始端，默认朝上、反向显示时朝下 */
+function nodeStyle(lane: LaneId): Record<string, string> {
+  const startY = yOfDay(laneBounds.value[lane].from);
+  return {
+    left: `${axisX[lane]}px`,
+    top: `${startY + (dir.value > 0 ? -NODE_GAP : NODE_GAP)}px`,
+  };
+}
+
+/** 轴线只画在时间线的起止范围内，两端实心结束 */
 function spineStyle(lane: LaneId) {
   const { from, to } = laneBounds.value[lane];
   const a = yOfDay(from);
@@ -1113,55 +1141,7 @@ onBeforeUnmount(() => {
       @pointerdown="onPointerDown"
       @wheel="onCanvasWheel"
     >
-      <header class="axis__head" :style="{ height: `${TOP_BAR}px` }">
-        <div
-          v-for="lane in lanes"
-          :key="lane.id"
-          class="lane-chip"
-          :class="`is-${lane.id}`"
-        >
-          <input
-            class="lane-chip__name"
-            :value="lane.label"
-            aria-label="时间线名称"
-            spellcheck="false"
-            @change="renameLane(lane.id, $event)"
-            @keydown.enter.prevent="commitInput"
-            @pointerdown.stop
-            @wheel.stop
-          />
-          <span class="lane-chip__count">{{ totals[lane.id] }}</span>
-          <span class="lane-chip__edges">
-            <input
-              class="lane-chip__edge"
-              :value="lane.start"
-              placeholder="起"
-              title="起点，可写 YYYY、YYYY-MM 或 YYYY-MM-DD；留空延伸到最早事件"
-              aria-label="时间线起点"
-              spellcheck="false"
-              @change="setLaneEdge(lane.id, 'start', $event)"
-              @keydown.enter.prevent="commitInput"
-              @pointerdown.stop
-              @wheel.stop
-            />
-            <i>–</i>
-            <input
-              class="lane-chip__edge"
-              :value="lane.end"
-              placeholder="止"
-              title="终点，可写 YYYY、YYYY-MM 或 YYYY-MM-DD；留空延伸到今天"
-              aria-label="时间线终点"
-              spellcheck="false"
-              @change="setLaneEdge(lane.id, 'end', $event)"
-              @keydown.enter.prevent="commitInput"
-              @pointerdown.stop
-              @wheel.stop
-            />
-          </span>
-        </div>
-      </header>
-
-      <div class="axis__plot" :style="{ top: `${TOP_BAR}px` }">
+      <div class="axis__plot">
         <i
           v-for="tick in ticks"
           :key="tick.day"
@@ -1222,6 +1202,53 @@ onBeforeUnmount(() => {
             :data-lane="lane.id"
           >
             <div class="axis__spine" :style="spineStyle(lane.id)"></div>
+
+            <div
+              class="lane-node"
+              :class="dir > 0 ? 'is-above' : 'is-below'"
+              :style="nodeStyle(lane.id)"
+            >
+              <div class="lane-node__head">
+                <input
+                  class="lane-node__name"
+                  :value="lane.label"
+                  aria-label="时间线名称"
+                  spellcheck="false"
+                  @change="renameLane(lane.id, $event)"
+                  @keydown.enter.prevent="commitInput"
+                  @pointerdown.stop
+                  @wheel.stop
+                />
+                <span class="lane-node__count">{{ totals[lane.id] }}</span>
+              </div>
+              <div class="lane-node__edges">
+                <input
+                  class="lane-node__edge"
+                  :value="lane.start"
+                  placeholder="起"
+                  title="起点，可写 YYYY、YYYY-MM 或 YYYY-MM-DD；留空取该线最早事件"
+                  aria-label="时间线起点"
+                  spellcheck="false"
+                  @change="setLaneEdge(lane.id, 'start', $event)"
+                  @keydown.enter.prevent="commitInput"
+                  @pointerdown.stop
+                  @wheel.stop
+                />
+                <i>–</i>
+                <input
+                  class="lane-node__edge"
+                  :value="lane.end"
+                  placeholder="止"
+                  title="终点，可写 YYYY、YYYY-MM 或 YYYY-MM-DD；留空取该线最晚事件"
+                  aria-label="时间线终点"
+                  spellcheck="false"
+                  @change="setLaneEdge(lane.id, 'end', $event)"
+                  @keydown.enter.prevent="commitInput"
+                  @pointerdown.stop
+                  @wheel.stop
+                />
+              </div>
+            </div>
 
             <template v-for="event in placed[lane.id]" :key="event.id">
               <span
