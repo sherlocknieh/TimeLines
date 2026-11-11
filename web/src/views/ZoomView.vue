@@ -39,6 +39,10 @@ const UNIT_LABEL: Record<Unit, string> = { day: "天", month: "月", year: "年"
 const NODE_GAP = 10;
 /** 轴线与事件标签之间的横向距离 */
 const AXIS_GAP = 30;
+/** 轴线缩放的横向热区宽度：以轴线为中心左右各一半 */
+const AXIS_BAND = 64;
+/** 轴线热区的最小纵向高度，轴段被视野压扁时仍能抓到 */
+const AXIS_BAND_MIN = 12;
 /** 区间线段与轴线的横向偏移，落在标签连线内侧 */
 const RANGE_OFFSET = 8;
 /** 标签高度（像素）：L1 字号更大，用于遮挡判断与垂直居中 */
@@ -545,7 +549,9 @@ let drag: {
   span: number;
   lane: LaneId;
   axisX: number;
-  mode: "axis" | "time" | "mid" | null;
+  /** 手势是否起于轴线热区：只有轴上横向拖动才移动轴线 */
+  canAxis: boolean;
+  mode: "axis" | "time" | "mid" | "none" | null;
 } | null = null;
 let moved = false;
 
@@ -556,9 +562,11 @@ function onPointerMove(event: PointerEvent) {
   const dy = event.clientY - drag.y;
 
   if (drag.mode === null && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) {
-    drag.mode = Math.abs(dx) > Math.abs(dy) ? "axis" : "time";
+    // 只有起于轴段热区的横向手势才拖轴，其余横向手势不移动任何东西
+    if (Math.abs(dx) > Math.abs(dy)) drag.mode = drag.canAxis ? "axis" : "none";
+    else drag.mode = "time";
   }
-  if (drag.mode === null) return;
+  if (drag.mode === null || drag.mode === "none") return;
 
   moved = true;
   if (drag.mode === "axis") {
@@ -625,6 +633,8 @@ function onPointerDown(event: PointerEvent) {
     span: span.value,
     lane,
     axisX: axisX[lane],
+    // 轴线只在自身区段内可拖，其余位置横拖不再移动轴线
+    canAxis: inAxisBand(lane, event.clientX, event.clientY),
     mode: onMidline ? "mid" : null,
   };
   dragging.value = true;
@@ -899,6 +909,40 @@ function spineStyle(lane: LaneId) {
     left: `${axisX[lane]}px`,
     top: `${Math.min(a, b)}px`,
     height: `${Math.abs(b - a)}px`,
+  };
+}
+
+/** 轴线热区的纵向范围：与轴线等长，只覆盖这条时间线的起止区段 */
+function axisBand(lane: LaneId): { top: number; height: number } {
+  const { from, to } = laneBounds.value[lane];
+  const a = yOfDay(from);
+  const b = yOfDay(to);
+  const span = Math.abs(b - a);
+  // 轴段被视野压得比最小热区还短时，围绕轴段中心向外补足
+  const height = Math.max(AXIS_BAND_MIN, span);
+  return { top: Math.min(a, b) - (height - span) / 2, height };
+}
+
+/** 指针是否落在某条轴线的热区内：横向贴轴、纵向落在轴段上 */
+function inAxisBand(lane: LaneId, clientX: number, clientY: number): boolean {
+  const rect = viewport.value?.getBoundingClientRect();
+  if (!rect) return false;
+  const { top, height } = axisBand(lane);
+  const y = clientY - rect.top;
+  return (
+    Math.abs(clientX - rect.left - axisX[lane]) <= AXIS_BAND / 2 &&
+    y >= top &&
+    y <= top + height
+  );
+}
+
+/** 缩放热区与轴线等长，滚轮只在轴段上生效 */
+function bandStyle(lane: LaneId) {
+  const { top, height } = axisBand(lane);
+  return {
+    left: `${axisX[lane] - AXIS_BAND / 2}px`,
+    top: `${top}px`,
+    height: `${height}px`,
   };
 }
 
@@ -1311,7 +1355,7 @@ onBeforeUnmount(() => {
 
             <div
               class="axis__band"
-              :style="{ left: `${axisX[lane.id] - 32}px` }"
+              :style="bandStyle(lane.id)"
               @wheel.prevent.stop="onAxisWheel"
               @pointermove="onAxisMove"
               @pointerleave="clearHover"

@@ -589,11 +589,9 @@ body {
   z-index: 1;
 }
 
-/* 轴线附近是缩放热区；热区之外的滚轮用来平移时间 */
+/* 轴线附近是缩放热区，长度与轴线一致；热区之外的滚轮用来平移时间 */
 .axis__band {
   position: absolute;
-  top: 0;
-  bottom: 0;
   width: 64px;
   z-index: 5;
   cursor: zoom-in;
