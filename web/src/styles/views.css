@@ -450,13 +450,13 @@ body {
   user-select: none;
 }
 
-/* 时间线标题节点：贴在轴线起始端，本身就是一个可改写的标题 */
+/* 时间线标题气泡：默认贴在轴线左侧的小气泡，点开后才展开成起止编辑面板 */
 .lane-node {
   position: absolute;
   z-index: 7;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   gap: 3px;
   padding: 4px 10px 5px;
   border: 1px solid var(--line);
@@ -470,12 +470,40 @@ body {
 /* 默认在轴线起始端上方，反向显示时翻到下方 */
 .lane-node.is-above { transform: translateY(-100%); }
 .lane-node.is-below { transform: translateY(0); }
-.lane-node__head {
+/* 小气泡本身就是拖动抓手：整块可拖，点击展开编辑 */
+.lane-node.is-collapsed {
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+}
+.lane-node__bubble {
   display: flex;
   align-items: baseline;
   gap: 6px;
+  padding: 3px 9px 4px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--lane);
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: 0 10px 22px -20px rgb(var(--shadow-rgb) / 0.45);
+  cursor: grab;
 }
-.lane-node__name {
+.lane-node__bubble:hover {
+  border-color: var(--line-hover);
+  background: var(--surface-2);
+}
+.lane-node__bubble:focus-visible {
+  outline: 2px solid var(--lane);
+  outline-offset: 2px;
+}
+.lane-node__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.lane-node__name,
+.lane-node__name-input {
   width: 5.6em;
   min-width: 0;
   padding: 0 2px;
@@ -489,8 +517,12 @@ body {
   letter-spacing: 0.02em;
   text-align: center;
 }
-.lane-node__name:hover,
-.lane-node__name:focus {
+.lane-node__name-input {
+  width: 7em;
+  text-align: left;
+}
+.lane-node__name-input:hover,
+.lane-node__name-input:focus {
   outline: none;
   border-bottom-color: var(--line);
   background: var(--surface-2);
@@ -501,18 +533,31 @@ body {
   letter-spacing: 0.06em;
   color: var(--ink-3);
 }
-/* 起止只在悬停或聚焦时展开，平时保持标题节点的轻量 */
+/* 展开态才显示起止输入：平时只留一颗轻量气泡 */
+.lane-node__done {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-size: 0.7rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.lane-node__done:hover {
+  border-color: var(--line-hover);
+  color: var(--ink);
+}
 .lane-node__edges {
-  display: none;
+  display: flex;
   align-items: center;
   gap: 3px;
   font-family: var(--mono);
   font-size: 0.58rem;
   color: var(--ink-3);
-}
-.lane-node:hover .lane-node__edges,
-.lane-node:focus-within .lane-node__edges {
-  display: flex;
 }
 .lane-node__edge {
   width: 64px;
@@ -557,9 +602,10 @@ body {
   stroke-dasharray: 3 3;
 }
 
-/* 抓取中的手型覆盖所有可拖区域，包括基准线气泡 */
+/* 抓取中的手型覆盖所有可拖区域，包括基准线气泡与标题气泡 */
 .axis.is-dragging,
 .axis.is-dragging .axis__band,
+.axis.is-dragging .lane-node__bubble,
 .axis.is-dragging .axis__midline span { cursor: grabbing; }
 
 /* 轴线覆盖且只覆盖这条时间线的起止区段，两端实心结束、不做渐变 */

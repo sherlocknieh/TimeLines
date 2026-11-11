@@ -303,6 +303,8 @@ const axisOffset = reactive<Record<LaneId, number>>(
 const selected = ref<number | null>(null);
 const hover = ref<{ y: number; day: number; lane: LaneId } | null>(null);
 const dragging = ref(false);
+/** 正在编辑起止的时间线：点开的标题气泡切换成可编辑的大气泡 */
+const editingLane = ref<LaneId | null>(null);
 const query = ref("");
 const searchOpen = ref(false);
 const activeResult = ref(0);
@@ -632,6 +634,8 @@ let drag: {
   offset: number;
   /** 手势是否起于轴线热区：只有轴上横向拖动才移动轴线 */
   canAxis: boolean;
+  /** 手势是否起于标题气泡：气泡只用来拖轴，纵向拖动不改时间 */
+  fromNode: boolean;
   mode: "axis" | "time" | "mid" | "none" | null;
 } | null = null;
 let moved = false;
@@ -643,9 +647,10 @@ function onPointerMove(event: PointerEvent) {
   const dy = event.clientY - drag.y;
 
   if (drag.mode === null && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) {
-    // 只有起于轴段热区的横向手势才拖轴，其余横向手势不移动任何东西
+    // 横向手势在轴段热区或标题气泡上拖轴，其余横向手势不移动任何东西
     if (Math.abs(dx) > Math.abs(dy)) drag.mode = drag.canAxis ? "axis" : "none";
-    else drag.mode = "time";
+    // 起于气泡的纵向手势不做任何事，避免拖标题时误平移时间
+    else drag.mode = drag.fromNode ? "none" : "time";
   }
   if (drag.mode === null || drag.mode === "none") return;
 
@@ -694,7 +699,6 @@ function onPointerDown(event: PointerEvent) {
   moved = false;
   const target = event.target as HTMLElement | null;
   if (target?.closest("button, a, input, label, .lane-node")) return;
-
   // 指针落在哪条时间线上，就只拖动那条线的轴线
   const lane = laneAt(target, event.clientX, event.clientY);
   const top = viewport.value?.getBoundingClientRect().top ?? 0;
@@ -716,6 +720,7 @@ function onPointerDown(event: PointerEvent) {
     offset: axisOffset[lane],
     // 轴线只在自身区段内可拖，其余位置横拖不再移动轴线
     canAxis: inAxisBand(lane, event.clientX, event.clientY),
+    fromNode: false,
     mode: onMidline ? "mid" : null,
   };
   dragging.value = true;
@@ -729,17 +734,61 @@ function pick(id: number) {
   selected.value = selected.value === id ? null : id;
 }
 
+/**
+ * 标题气泡按住即拖动轴线：直接进入 axis 手势，不必先落在轴段热区。
+ * 没有拖动时 click 才打开起止编辑，因此拖动过程不会误触展开。
+ */
+function onNodePointerDown(lane: LaneId, event: PointerEvent) {
+  if (event.button !== 0) return;
+  moved = false;
+  dragging.value = true;
+  drag = {
+    x: event.clientX,
+    y: event.clientY,
+    top: viewport.value?.getBoundingClientRect().top ?? 0,
+    center: center.value,
+    origin: logOrigin.value,
+    span: span.value,
+    lane,
+    offset: axisOffset[lane],
+    canAxis: true,
+    fromNode: true,
+    // 与画布手势一致：超过阈值才判定为拖动，避免抖动吞掉点击
+    mode: null,
+  };
+  window.addEventListener("pointermove", onPointerMove);
+  window.addEventListener("pointerup", onPointerUp);
+  window.addEventListener("pointercancel", onPointerUp);
+}
+
+/** 点击气泡展开成大气泡，用来编辑名称与起止 */
+async function onNodeActivate(lane: LaneId) {
+  if (moved) return;
+  editingLane.value = lane;
+  await nextTick();
+  viewport.value
+    ?.querySelector<HTMLInputElement>(".lane-node.is-open .lane-node__edge")
+    ?.focus({ preventScroll: true });
+}
+
 function closeCard() {
   selected.value = null;
 }
 
 function onKeydown(event: KeyboardEvent) {
-  if (event.key === "Escape") closeCard();
+  if (event.key !== "Escape") return;
+  // Esc 先收起展开的起止编辑，再收起事件卡片
+  if (editingLane.value !== null) editingLane.value = null;
+  else closeCard();
 }
 
+/** 点画布空白处收起展开的起止编辑 */
 function onGlobalPointerDown(event: PointerEvent) {
+  const target = event.target as HTMLElement | null;
+  if (editingLane.value !== null && !target?.closest(".lane-node")) {
+    editingLane.value = null;
+  }
   if (!searchOpen.value) return;
-  const target = event.target as Node | null;
   if (target && searchWrap.value?.contains(target)) return;
   searchOpen.value = false;
 }
@@ -990,15 +1039,22 @@ const totals = computed<Record<LaneId, number>>(() => {
 });
 
 /**
- * 标题节点贴在轴线的起始端，默认朝上、反向显示时朝下。
- * 节点从轴线向右展开，不侵占左侧上一条时间线的标签空间；
- * 父时间线与首个子时间线起点常常相同，父节点再让开一段，避免两个节点叠在一起。
+ * 标题气泡贴在轴线起始端的左侧，默认朝上、反向显示时朝下。
+ * 气泡挂在轴左侧，右侧留给事件标签；父时间线与首个子时间线起点常常相同，
+ * 父气泡再让开一段，避免两个气泡叠在一起。
  */
 function nodeStyle(lane: LaneId): Record<string, string> {
   const startY = yOfDay(laneBounds.value[lane].from);
   const gap = NODE_GAP + (laneParent(lane) === null ? 40 : 0);
+  // 气泡挂在轴左侧，展开时向左生长；估算宽度只用来防止贴边时溢出画布
+  const estimate = editingLane.value === lane ? 200 : 130;
+  const right = clamp(
+    width.value - axisAt(lane) + 8,
+    6,
+    Math.max(6, width.value - 6 - estimate),
+  );
   return {
-    left: `${axisAt(lane) + 8}px`,
+    right: `${right}px`,
     top: `${startY + (dir.value > 0 ? -gap : gap)}px`,
   };
 }
@@ -1381,49 +1437,73 @@ onBeforeUnmount(() => {
 
             <div
               class="lane-node"
-              :class="dir > 0 ? 'is-above' : 'is-below'"
+              :class="[
+                dir > 0 ? 'is-above' : 'is-below',
+                editingLane === lane.id ? 'is-open' : 'is-collapsed',
+              ]"
               :style="nodeStyle(lane.id)"
+              @pointerdown.stop
             >
-              <div class="lane-node__head">
-                <input
-                  class="lane-node__name"
-                  :value="lane.label"
-                  aria-label="时间线名称"
-                  spellcheck="false"
-                  @change="renameLane(lane.id, $event)"
-                  @keydown.enter.prevent="commitInput"
-                  @pointerdown.stop
-                  @wheel.stop
-                />
+              <button
+                v-if="editingLane !== lane.id"
+                class="lane-node__bubble"
+                type="button"
+                :aria-label="`${lane.label}：拖动可移动轴线，点击可编辑起止`"
+                :title="`${lane.label} · ${totals[lane.id]} 个事件（拖动移动轴线，点击编辑起止）`"
+                @pointerdown="onNodePointerDown(lane.id, $event)"
+                @click="onNodeActivate(lane.id)"
+              >
+                <span class="lane-node__name">{{ lane.label }}</span>
                 <span class="lane-node__count">{{ totals[lane.id] }}</span>
-              </div>
-              <div class="lane-node__edges">
-                <input
-                  class="lane-node__edge"
-                  :value="lane.start"
-                  placeholder="起"
-                  title="起点，可写 YYYY、YYYY-MM 或 YYYY-MM-DD；留空取该线最早事件"
-                  aria-label="时间线起点"
-                  spellcheck="false"
-                  @change="setLaneEdge(lane.id, 'start', $event)"
-                  @keydown.enter.prevent="commitInput"
-                  @pointerdown.stop
-                  @wheel.stop
-                />
-                <i>–</i>
-                <input
-                  class="lane-node__edge"
-                  :value="lane.end"
-                  placeholder="止"
-                  title="终点，可写 YYYY、YYYY-MM 或 YYYY-MM-DD；留空取该线最晚事件"
-                  aria-label="时间线终点"
-                  spellcheck="false"
-                  @change="setLaneEdge(lane.id, 'end', $event)"
-                  @keydown.enter.prevent="commitInput"
-                  @pointerdown.stop
-                  @wheel.stop
-                />
-              </div>
+              </button>
+              <template v-else>
+                <div class="lane-node__head">
+                  <input
+                    class="lane-node__name-input"
+                    :value="lane.label"
+                    aria-label="时间线名称"
+                    spellcheck="false"
+                    @change="renameLane(lane.id, $event)"
+                    @keydown.enter.prevent="commitInput"
+                    @wheel.stop
+                  />
+                  <span class="lane-node__count">{{ totals[lane.id] }}</span>
+                  <button
+                    class="lane-node__done"
+                    type="button"
+                    aria-label="收起起止编辑"
+                    title="收起"
+                    @click="editingLane = null"
+                  >
+                    ×
+                  </button>
+                </div>
+                <div class="lane-node__edges">
+                  <input
+                    class="lane-node__edge"
+                    :value="lane.start"
+                    placeholder="起"
+                    title="起点，可写 YYYY、YYYY-MM 或 YYYY-MM-DD；留空取该线最早事件"
+                    aria-label="时间线起点"
+                    spellcheck="false"
+                    @change="setLaneEdge(lane.id, 'start', $event)"
+                    @keydown.enter.prevent="commitInput"
+                    @wheel.stop
+                  />
+                  <i>–</i>
+                  <input
+                    class="lane-node__edge"
+                    :value="lane.end"
+                    placeholder="止"
+                    title="终点，可写 YYYY、YYYY-MM 或 YYYY-MM-DD；留空取该线最晚事件"
+                    aria-label="时间线终点"
+                    spellcheck="false"
+                    @change="setLaneEdge(lane.id, 'end', $event)"
+                    @keydown.enter.prevent="commitInput"
+                    @wheel.stop
+                  />
+                </div>
+              </template>
             </div>
 
             <template v-for="event in placed[lane.id]" :key="event.id">
