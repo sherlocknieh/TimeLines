@@ -35,10 +35,8 @@ const UNIT_DAYS: Record<Unit, number> = {
 };
 const UNIT_LABEL: Record<Unit, string> = { day: "天", month: "月", year: "年" };
 
-/** 轴线在各自时间线列内的默认横向比例：居中，标签向列内一侧展开 */
-const AXIS_RATIO = 0.5;
-/** 列头高度：放时间线名称与起止，绘图区从它下方开始 */
-const COLUMN_HEADER = 46;
+/** 顶部时间线栏高度：放各线名称与起止，绘图区从它下方开始 */
+const TOP_BAR = 46;
 /** 轴线与事件标签之间的横向距离 */
 const AXIS_GAP = 30;
 /** 区间线段与轴线的横向偏移，落在标签连线内侧 */
@@ -252,7 +250,7 @@ const reversed = ref(false);
 const unit = ref<Unit>("year");
 const center = ref(0);
 const span = ref(1);
-/** 每条时间线各自的轴线位置（列内坐标），可分别左右拖动 */
+/** 每条时间线各自的轴线横坐标（画布坐标），可分别左右拖动 */
 const axisX = reactive<Record<LaneId, number>>(
   Object.fromEntries(LANE_IDS.map((lane) => [lane, 0])),
 );
@@ -265,25 +263,17 @@ const activeResult = ref(0);
 const searchWrap = ref<HTMLElement | null>(null);
 const originInput = ref<HTMLInputElement | null>(null);
 
-/** 单条时间线的列宽：所有时间线平分同一个面板，数量变化时自动重算 */
-const columnWidth = computed(() =>
-  Math.max(120, width.value / Math.max(1, LANES.length)),
-);
+/** 轴线默认位置：所有时间线在同一块画布里均匀铺开 */
+const axisDefault = (lane: LaneId) =>
+  ((laneIndex(lane) + 0.5) / Math.max(1, LANES.length)) * width.value;
 
-/** 列在面板中的横向起点，列内坐标都相对它计算 */
-const columnLeft = (lane: LaneId) => laneIndex(lane) * columnWidth.value;
-
-/** 标签排在轴线的哪一侧：相邻列的标签因此背对背，不会互相挤占 */
+/** 标签排在轴线的哪一侧：相邻两条时间线的标签因此背对背展开 */
 const labelSide = (lane: LaneId): "left" | "right" =>
   laneIndex(lane) % 2 === 0 ? "right" : "left";
 
-/** 轴线默认位置：列内居中 */
-const axisDefault = (lane: LaneId) =>
-  columnWidth.value * AXIS_RATIO;
-
-/** 轴线可移动的左右边界，保证标签与状态气泡都还有落脚处 */
+/** 轴线可移动的左右边界，保证标签与时间读数都还有落脚处 */
 const axisMargin = computed(() =>
-  Math.min(120, Math.max(40, columnWidth.value * 0.22)),
+  Math.min(140, Math.max(64, width.value * 0.07)),
 );
 
 const unitDays = computed(() => UNIT_DAYS[unit.value]);
@@ -307,8 +297,8 @@ function fromP(position: number): number {
   return logOrigin.value + offsetOfP(position);
 }
 
-/** 绘图区高度：面板去掉列头后的部分，所有时间线共用同一高度 */
-const plotArea = computed(() => Math.max(1, height.value - COLUMN_HEADER));
+/** 绘图区高度：面板去掉顶部时间线栏后的部分 */
+const plotArea = computed(() => Math.max(1, height.value - TOP_BAR));
 
 /** 绘图区上下留白：面板变矮时同步收窄，避免留白吃掉可视高度 */
 const plotPad = computed(() => Math.min(PLOT_PAD, plotArea.value * 0.18));
@@ -320,7 +310,7 @@ const plotHeight = computed(() =>
 /** 基准线所在高度：始终画在选中日期上，随内容平移、缩放与反向移动 */
 const midY = computed(() => yOfDay(logOrigin.value));
 
-/** 纵向映射都在列内部坐标系里进行，渲染时再加列偏移 */
+/** 纵向映射在整块画布里统一进行，所有时间线共用 */
 const yOfP = (position: number) =>
   plotPad.value +
   ((dir.value * (position - center.value) + span.value / 2) / span.value) *
@@ -372,7 +362,7 @@ function clampAxis(lane: LaneId) {
   axisX[lane] = clamp(
     axisX[lane],
     axisMargin.value,
-    columnWidth.value - axisMargin.value,
+    Math.max(axisMargin.value, width.value - axisMargin.value),
   );
 }
 
@@ -473,16 +463,18 @@ function laneAt(
   const marked = el?.closest<HTMLElement>("[data-lane]")?.dataset.lane;
   if (marked !== undefined && LANE_IDS.includes(marked)) return marked;
   if (clientX === undefined) return LANE_IDS[0];
-  // 落在列外时按横向位置就近归属到某一列
+  // 落在空白处时归属到横向最近的轴线
   const rect = viewport.value?.getBoundingClientRect();
-  const index = Math.floor((clientX - (rect?.left ?? 0)) / columnWidth.value);
-  return LANE_IDS[clamp(index, 0, LANE_IDS.length - 1)];
+  const x = clientX - (rect?.left ?? 0);
+  return LANE_IDS.reduce((best, lane) =>
+    Math.abs(axisX[lane] - x) < Math.abs(axisX[best] - x) ? lane : best,
+  );
 }
 
-/** 把视口坐标换算成某条时间线列内的纵向坐标 */
+/** 把视口坐标换算成画布内的纵向坐标 */
 function localY(clientY: number): number {
   const rect = viewport.value?.getBoundingClientRect();
-  return clientY - (rect?.top ?? 0) - COLUMN_HEADER;
+  return clientY - (rect?.top ?? 0) - TOP_BAR;
 }
 
 function zoomAt(factor: number, y: number) {
@@ -506,8 +498,9 @@ function onAxisWheel(event: WheelEvent) {
 
 /** 轴线热区之外：滚轮平移时间 */
 function onCanvasWheel(event: WheelEvent) {
-  // 列头的输入框自己滚动，不参与时间平移
-  if ((event.target as HTMLElement | null)?.closest("input")) return;
+  // 顶部时间线栏自己横向滚动，不抢占成时间平移
+  if ((event.target as HTMLElement | null)?.closest(".axis__head, input")) return;
+  event.preventDefault();
   const scaleBy =
     event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? plotHeight.value : 1;
   const shift =
@@ -556,7 +549,7 @@ function onPointerMove(event: PointerEvent) {
   } else if (drag.mode === "mid") {
     // 基准线搬到指针处并选中该日期：按拖拽起点的布局换算，避免逐帧叠加失真
     const ratio = clamp(
-      (event.clientY - drag.top - COLUMN_HEADER - plotPad.value) /
+      (event.clientY - drag.top - TOP_BAR - plotPad.value) /
         plotHeight.value,
       0.05,
       0.95,
@@ -592,7 +585,7 @@ function onPointerDown(event: PointerEvent) {
   // 每次重新按下都是一次新手势，避免上一次拖拽的 moved 标记吞掉气泡点击
   moved = false;
   const target = event.target as HTMLElement | null;
-  if (target?.closest("button, a, input, label")) return;
+  if (target?.closest("button, a, input, label, .axis__head")) return;
 
   // 指针落在哪条时间线上，就只拖动那条线的轴线
   const lane = laneAt(target, event.clientX, event.clientY);
@@ -601,7 +594,7 @@ function onPointerDown(event: PointerEvent) {
   // 基准线在两种分布下都可抓取：气泡本身或线上下几条像素
   const onMidline =
     Boolean(target?.closest(".axis__midline")) ||
-    Math.abs(event.clientY - top - COLUMN_HEADER - midY.value) <= 8;
+    Math.abs(event.clientY - top - TOP_BAR - midY.value) <= 8;
 
   selected.value = null;
   drag = {
@@ -847,7 +840,20 @@ const ranges = computed<Record<LaneId, { id: number; x: number; y1: number; y2: 
   },
 );
 
-/** 每条时间线的事件总数，显示在列头上 */
+/** 统一绘图区里的连线与区间：所有时间线的坐标已经落在同一套画布坐标系 */
+const allLinks = computed(() =>
+  LANE_IDS.flatMap((lane) =>
+    links.value[lane].map((link) => ({ ...link, lane })),
+  ),
+);
+
+const allRanges = computed(() =>
+  LANE_IDS.flatMap((lane) =>
+    ranges.value[lane].map((range) => ({ ...range, lane })),
+  ),
+);
+
+/** 每条时间线的事件总数，显示在顶部时间线栏 */
 const totals = computed<Record<LaneId, number>>(() => {
   const out = byLane(() => 0);
   for (const event of events) {
@@ -868,26 +874,20 @@ function spineStyle(lane: LaneId) {
   };
 }
 
-/** 今天是否落在该时间线的起止范围内 */
-function todayInLane(lane: LaneId): boolean {
-  const { from, to } = laneBounds.value[lane];
-  return todayDay >= from && todayDay <= to;
-}
-
-/** 今天与基准气泡贴在标签的另一侧，避开事件标签 */
-function statusStyle(lane: LaneId) {
+/**
+ * 标签可用的横向空间：算到标签一侧最近的轴线或画布边缘。
+ * 相邻两条时间线的标签会在同一段间隔里相遇，相遇时各占一半。
+ */
+function labelRoom(lane: LaneId): number {
   const x = axisX[lane];
-  return labelSide(lane) === "right"
-    ? { right: `${columnWidth.value - x + AXIS_GAP}px`, left: "auto" }
-    : { left: `${x + AXIS_GAP}px`, right: "auto" };
-}
-
-/** 时间线列在面板中的位置与尺寸：数量变化时按列宽自动重排 */
-function columnStyle(lane: LaneId) {
-  return {
-    left: `${columnLeft(lane)}px`,
-    width: `${columnWidth.value}px`,
-  };
+  const xs = LANE_IDS.map((id) => axisX[id]).sort((a, b) => a - b);
+  const right = labelSide(lane) === "right";
+  const neighbor = right
+    ? xs.find((value) => value > x + 1)
+    : [...xs].reverse().find((value) => value < x - 1);
+  const edge = right ? width.value : 0;
+  const span = Math.abs((neighbor ?? edge) - x) / (neighbor === undefined ? 1 : 2);
+  return span - AXIS_GAP - 8;
 }
 
 /** 卡片与搜索使用的完整日期；区间事件给出两个端点 */
@@ -987,14 +987,13 @@ function locate(event: AxisEvent) {
   searchOpen.value = false;
 }
 
-/** 卡片取代气泡出现在同一位置：排在轴线外侧，并保证整体留在所属列内 */
+/** 卡片取代气泡出现在同一位置：排在轴线外侧，并保证整体留在画布内 */
 function cardStyle(event: Placed) {
   const x = axisX[event.lane];
   const left = labelSide(event.lane) === "left";
-  const room = left ? x - AXIS_GAP : columnWidth.value - x - AXIS_GAP;
-  const maxWidth = columnWidth.value - CARD_PAD * 2;
+  const maxWidth = width.value - CARD_PAD * 2;
   const cardWidth = clamp(
-    Math.min(room, CARD_MAX_WIDTH),
+    Math.min(labelRoom(event.lane), CARD_MAX_WIDTH),
     Math.min(CARD_MIN_WIDTH, maxWidth),
     maxWidth,
   );
@@ -1002,7 +1001,7 @@ function cardStyle(event: Placed) {
   const cardLeft = clamp(
     preferred,
     CARD_PAD,
-    columnWidth.value - CARD_PAD - cardWidth,
+    width.value - CARD_PAD - cardWidth,
   );
   const half = Math.max(
     48,
@@ -1025,20 +1024,16 @@ function cardStyle(event: Placed) {
   };
 }
 
-/** 标签排在轴线外侧，坐标相对所在列 */
+/** 标签排在轴线外侧，宽度不越过相邻轴线，文字先省略 */
 function labelStyle(event: Placed) {
   const x = axisX[event.lane];
   const left = labelSide(event.lane) === "left";
-  // 宽度不越过所在列，窄列上让文字先省略，而不是被列的裁剪切掉
-  const room = left
-    ? x - AXIS_GAP - 8
-    : columnWidth.value - x - AXIS_GAP - 8;
   return {
     ...(left
-      ? { right: `${columnWidth.value - x + AXIS_GAP}px` }
+      ? { right: `${width.value - x + AXIS_GAP}px` }
       : { left: `${x + AXIS_GAP}px` }),
     top: `${event.labelTop}px`,
-    maxWidth: `${Math.max(80, room)}px`,
+    maxWidth: `${Math.max(80, labelRoom(event.lane))}px`,
   };
 }
 
@@ -1070,7 +1065,7 @@ const hoverReadoutStyle = computed(() => {
       }
     : {
         top: `${hoverText.value.y}px`,
-        right: `${Math.max(0, columnWidth.value - x + AXIS_GAP)}px`,
+        right: `${Math.max(0, width.value - x + AXIS_GAP)}px`,
         left: "auto",
       };
 });
@@ -1085,7 +1080,7 @@ function syncSize() {
   );
   width.value = Math.max(320, el.clientWidth);
   height.value = Math.max(120, el.clientHeight);
-  // 尺寸变化后轴线仍停在默认位置时，跟着新的列宽重新对齐
+  // 尺寸变化后轴线仍停在默认位置时，跟着新的画布宽度重新对齐
   if (wasDefault) {
     for (const lane of LANE_IDS) axisX[lane] = axisDefault(lane);
   }
@@ -1116,19 +1111,17 @@ onBeforeUnmount(() => {
       class="axis"
       :class="{ 'is-dragging': dragging }"
       @pointerdown="onPointerDown"
-      @wheel.prevent="onCanvasWheel"
+      @wheel="onCanvasWheel"
     >
-      <section
-        v-for="lane in lanes"
-        :key="lane.id"
-        class="lane"
-        :class="`is-${lane.id}`"
-        :data-lane="lane.id"
-        :style="columnStyle(lane.id)"
-      >
-        <header class="lane__head" :style="{ height: `${COLUMN_HEADER}px` }">
+      <header class="axis__head" :style="{ height: `${TOP_BAR}px` }">
+        <div
+          v-for="lane in lanes"
+          :key="lane.id"
+          class="lane-chip"
+          :class="`is-${lane.id}`"
+        >
           <input
-            class="lane__name"
+            class="lane-chip__name"
             :value="lane.label"
             aria-label="时间线名称"
             spellcheck="false"
@@ -1137,10 +1130,10 @@ onBeforeUnmount(() => {
             @pointerdown.stop
             @wheel.stop
           />
-          <span class="lane__count">{{ totals[lane.id] }}</span>
-          <span class="lane__edge-group">
+          <span class="lane-chip__count">{{ totals[lane.id] }}</span>
+          <span class="lane-chip__edges">
             <input
-              class="lane__edge"
+              class="lane-chip__edge"
               :value="lane.start"
               placeholder="起"
               title="起点，可写 YYYY、YYYY-MM 或 YYYY-MM-DD；留空延伸到最早事件"
@@ -1153,7 +1146,7 @@ onBeforeUnmount(() => {
             />
             <i>–</i>
             <input
-              class="lane__edge"
+              class="lane-chip__edge"
               :value="lane.end"
               placeholder="止"
               title="终点，可写 YYYY、YYYY-MM 或 YYYY-MM-DD；留空延伸到今天"
@@ -1165,148 +1158,156 @@ onBeforeUnmount(() => {
               @wheel.stop
             />
           </span>
-        </header>
-
-        <div class="lane__plot" :style="{ top: `${COLUMN_HEADER}px` }">
-          <i
-            v-for="tick in ticks"
-            :key="tick.day"
-            class="axis__tick"
-            :style="{ top: `${tick.y}px` }"
-          >
-            <span v-if="tick.showLabel">{{ tick.label }}</span>
-          </i>
-
-          <div class="axis__spine" :style="spineStyle(lane.id)"></div>
-
-          <svg
-            class="axis__links"
-            :width="columnWidth"
-            :height="plotArea"
-            aria-hidden="true"
-          >
-            <line
-              v-for="range in ranges[lane.id]"
-              :key="`range-${range.id}`"
-              class="axis__range"
-              :x1="range.x"
-              :x2="range.x"
-              :y1="range.y1"
-              :y2="range.y2"
-            ></line>
-            <line
-              v-for="link in links[lane.id]"
-              :key="link.id"
-              :x1="link.x1"
-              :x2="link.x2"
-              :y1="link.y"
-              :y2="link.y"
-            ></line>
-          </svg>
-
-          <div
-            v-if="todayInLane(lane.id)"
-            class="axis__today"
-            :class="{ 'is-lifted': Math.abs(todayY - midY) < 24 }"
-            :style="{ top: `${todayY}px` }"
-          >
-            <span :style="statusStyle(lane.id)">今天</span>
-          </div>
-
-          <div class="axis__midline" :style="{ top: `${midY}px` }">
-            <span
-              :style="statusStyle(lane.id)"
-              title="上下拖动基准线，选中指针处的日期"
-              @wheel.prevent.stop="onAxisWheel"
-            >
-              基准 {{ originText }}
-            </span>
-          </div>
-
-          <template v-for="event in placed[lane.id]" :key="event.id">
-            <span
-              class="axis-event__dot"
-              :class="{ 'is-l1': event.lvl === 1 }"
-              :style="{ left: `${axisX[lane.id]}px`, top: `${event.anchor}px` }"
-            ></span>
-            <div
-              v-if="selected === event.id"
-              class="axis-event__card"
-              role="group"
-              :aria-labelledby="`event-title-${event.id}`"
-              :style="cardStyle(event)"
-              @pointerdown.stop
-              @wheel.stop
-            >
-              <button
-                class="axis-event__close"
-                type="button"
-                aria-label="收起事件卡片"
-                @click.stop="closeCard"
-              >
-                ×
-              </button>
-              <button
-                class="axis-event__origin"
-                :class="{ 'is-on': Math.abs(event.day - logOrigin) < 0.5 }"
-                type="button"
-                aria-label="把该事件移到基准线作为对数基准"
-                title="把该事件移到基准线作为对数基准"
-                @click.stop="useEventOrigin(event.day)"
-              >
-                <svg viewBox="0 0 16 16" aria-hidden="true">
-                  <circle cx="8" cy="8" r="3.2"></circle>
-                  <path d="M8 1v2.6M8 12.4V15M1 8h2.6M12.4 8H15"></path>
-                </svg>
-              </button>
-              <p class="axis-event__meta">
-                <b>{{ detailStamp(event) }}</b> · {{ lane.label }} ·
-                {{ event.tag }} · L{{ event.lvl }}
-              </p>
-              <h3 :id="`event-title-${event.id}`" class="axis-event__title">
-                {{ event.title }}
-              </h3>
-              <p class="axis-event__desc">{{ event.desc }}</p>
-            </div>
-            <button
-              v-else
-              class="axis-event__label"
-              :class="{ 'is-l1': event.lvl === 1 }"
-              :style="labelStyle(event)"
-              type="button"
-              :data-event="event.id"
-              :title="`${labelStamp(event)} ${event.title}`"
-              @click.stop="pick(event.id)"
-            >
-              <b>{{ labelStamp(event) }}</b><span>{{ event.title }}</span>
-            </button>
-          </template>
-
-          <i
-            v-if="hover && hover.lane === lane.id"
-            class="axis__cursor"
-            :style="{ top: `${hover.y}px` }"
-          ></i>
-
-          <div
-            v-if="hoverText && hover && hover.lane === lane.id"
-            class="axis__readout"
-            :class="readoutRight ? 'is-right' : 'is-left'"
-            :style="hoverReadoutStyle"
-          >
-            <b>{{ hoverText.year }}</b>
-            <span>{{ hoverText.full }}</span>
-          </div>
-
-          <div
-            class="axis__band"
-            :style="{ left: `${axisX[lane.id] - 32}px` }"
-            @wheel.prevent.stop="onAxisWheel"
-            @pointermove="onAxisMove"
-            @pointerleave="clearHover"
-          ></div>
         </div>
-      </section>
+      </header>
+
+      <div class="axis__plot" :style="{ top: `${TOP_BAR}px` }">
+        <i
+          v-for="tick in ticks"
+          :key="tick.day"
+          class="axis__tick"
+          :style="{ top: `${tick.y}px` }"
+        >
+          <span v-if="tick.showLabel">{{ tick.label }}</span>
+        </i>
+
+        <svg
+          class="axis__links"
+          :width="width"
+          :height="plotArea"
+          aria-hidden="true"
+        >
+          <line
+            v-for="range in allRanges"
+            :key="`range-${range.lane}-${range.id}`"
+            class="axis__range"
+            :class="`is-${range.lane}`"
+            :x1="range.x"
+            :x2="range.x"
+            :y1="range.y1"
+            :y2="range.y2"
+          ></line>
+          <line
+            v-for="link in allLinks"
+            :key="`${link.lane}-${link.id}`"
+            :class="`is-${link.lane}`"
+            :x1="link.x1"
+            :x2="link.x2"
+            :y1="link.y"
+            :y2="link.y"
+          ></line>
+        </svg>
+
+        <div
+          class="axis__today"
+          :class="{ 'is-lifted': Math.abs(todayY - midY) < 24 }"
+          :style="{ top: `${todayY}px` }"
+        >
+          <span>今天</span>
+        </div>
+
+        <div class="axis__midline" :style="{ top: `${midY}px` }">
+          <span
+            title="上下拖动基准线，选中指针处的日期"
+            @wheel.prevent.stop="onAxisWheel"
+          >
+            基准 {{ originText }}
+          </span>
+        </div>
+
+        <template v-for="lane in lanes" :key="lane.id">
+          <div
+            class="lane-group"
+            :class="`is-${lane.id}`"
+            :data-lane="lane.id"
+          >
+            <div class="axis__spine" :style="spineStyle(lane.id)"></div>
+
+            <template v-for="event in placed[lane.id]" :key="event.id">
+              <span
+                class="axis-event__dot"
+                :class="{ 'is-l1': event.lvl === 1 }"
+                :style="{ left: `${axisX[lane.id]}px`, top: `${event.anchor}px` }"
+              ></span>
+              <div
+                v-if="selected === event.id"
+                class="axis-event__card"
+                role="group"
+                :aria-labelledby="`event-title-${event.id}`"
+                :style="cardStyle(event)"
+                @pointerdown.stop
+                @wheel.stop
+              >
+                <button
+                  class="axis-event__close"
+                  type="button"
+                  aria-label="收起事件卡片"
+                  @click.stop="closeCard"
+                >
+                  ×
+                </button>
+                <button
+                  class="axis-event__origin"
+                  :class="{ 'is-on': Math.abs(event.day - logOrigin) < 0.5 }"
+                  type="button"
+                  aria-label="把该事件移到基准线作为对数基准"
+                  title="把该事件移到基准线作为对数基准"
+                  @click.stop="useEventOrigin(event.day)"
+                >
+                  <svg viewBox="0 0 16 16" aria-hidden="true">
+                    <circle cx="8" cy="8" r="3.2"></circle>
+                    <path d="M8 1v2.6M8 12.4V15M1 8h2.6M12.4 8H15"></path>
+                  </svg>
+                </button>
+                <p class="axis-event__meta">
+                  <b>{{ detailStamp(event) }}</b> · {{ lane.label }} ·
+                  {{ event.tag }} · L{{ event.lvl }}
+                </p>
+                <h3 :id="`event-title-${event.id}`" class="axis-event__title">
+                  {{ event.title }}
+                </h3>
+                <p class="axis-event__desc">{{ event.desc }}</p>
+              </div>
+              <button
+                v-else
+                class="axis-event__label"
+                :class="{ 'is-l1': event.lvl === 1 }"
+                :style="labelStyle(event)"
+                type="button"
+                :data-event="event.id"
+                :title="`${labelStamp(event)} ${event.title}`"
+                @click.stop="pick(event.id)"
+              >
+                <b>{{ labelStamp(event) }}</b><span>{{ event.title }}</span>
+              </button>
+            </template>
+
+            <div
+              class="axis__band"
+              :style="{ left: `${axisX[lane.id] - 32}px` }"
+              @wheel.prevent.stop="onAxisWheel"
+              @pointermove="onAxisMove"
+              @pointerleave="clearHover"
+            ></div>
+          </div>
+        </template>
+
+        <i
+          v-if="hover"
+          class="axis__cursor"
+          :style="{ top: `${hover.y}px` }"
+        ></i>
+
+        <div
+          v-if="hoverText"
+          class="axis__readout"
+          :class="readoutRight ? 'is-right' : 'is-left'"
+          :style="hoverReadoutStyle"
+        >
+          <b>{{ hoverText.year }}</b>
+          <span>{{ hoverText.full }}</span>
+        </div>
+      </div>
     </div>
 
     <div class="toolbar">
