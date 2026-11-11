@@ -40,7 +40,7 @@ TimeLines/
 │       │   └── ZoomView.vue   # 缩放时间轴的布局与交互
 │       ├── data/events.ts     # demo 数据集（英国 × 美国）
 │       ├── lib/timeline.ts    # 标签遮挡筛选
-│       ├── lib/dataset.ts     # 泳道与通用工具
+│       ├── lib/dataset.ts     # 时间线标签与通用工具
 │       └── styles/views.css   # 全局基础样式、外壳与缩放轴样式
 ├── .dev/                      # 开发与构建脚本
 ├── patches/                   # 依赖本地补丁（关闭 Blume 外部字体）
@@ -76,7 +76,7 @@ TimeLines/
 
 - 前端源码只改 `web/src/`；`_build/`、`_dist/` 是构建产物，不要直接编辑。
 - demo 数据集中在 `web/src/data/events.ts`，与渲染逻辑分离，便于后续替换为真实时间线数据。
-- 标签遮挡筛选在 `web/src/lib/timeline.ts`，泳道标签与通用工具在 `web/src/lib/dataset.ts`。
+- 标签遮挡筛选在 `web/src/lib/timeline.ts`，时间线标签与通用工具在 `web/src/lib/dataset.ts`。
 - 新增文档放在 `docs/` 中，Blume 会根据文件树自动生成路由与侧边栏。
 - 构建产物为 `_dist/`，整体就是仓库 Pages 站点的内容：应用占 `/TimeLines`，文档占 `/TimeLines/docs`。推送 `main` 后由 `.github/workflows/deploy.yml` 自动发布到 GitHub Pages。
 - 文档站不使用外部字体：`blume.config.ts` 设置 `theme: { fonts: false }`，样式回落到系统字体栈。该开关来自 `patches/blume@1.7.3.patch`，升级 Blume 后需重新生成本地补丁，并确认构建日志不再抓取 Google Fonts。

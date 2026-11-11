@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  reactive,
+  ref,
+  watch,
+} from "vue";
 
 import { EVENTS, type Side } from "../data/events";
 import { clamp, laneLabel, laneOf } from "../lib/dataset";
@@ -21,6 +29,12 @@ const UNIT_DAYS: Record<Unit, number> = {
 };
 const UNIT_LABEL: Record<Unit, string> = { day: "天", month: "月", year: "年" };
 
+/** 轴线在面板内的默认横向比例：英国靠右、美国靠左，两条线在中间靠拢 */
+const AXIS_RATIO = 0.3;
+/** 两条时间线之间的分隔线宽度 */
+const PANEL_GAP = 1;
+/** 面板表头高度：放时间线名称与事件数，绘图区从它下方开始 */
+const PANEL_HEADER = 30;
 /** 轴线与事件标签之间的横向距离 */
 const AXIS_GAP = 30;
 /** 区间线段与轴线的横向偏移，落在标签连线内侧 */
@@ -129,6 +143,7 @@ const SAFE_MIN = DATA_MIN - Math.round(YEAR_DAYS * 2500);
 const SAFE_MAX = DATA_MAX + Math.round(YEAR_DAYS * 2);
 
 const viewport = ref<HTMLElement | null>(null);
+/** 画布整体尺寸：两条时间线并排，共用同一套纵向映射 */
 const width = ref(1100);
 const height = ref(560);
 const scale = ref<ScaleMode>("linear");
@@ -138,9 +153,10 @@ const reversed = ref(false);
 const unit = ref<Unit>("year");
 const center = ref(0);
 const span = ref(1);
-const axisX = ref(550);
+/** 每条时间线各自的轴线位置，可分别左右拖动 */
+const axisX = reactive<Record<Side, number>>({ uk: 0, us: 0 });
 const selected = ref<number | null>(null);
-const hover = ref<{ y: number; day: number } | null>(null);
+const hover = ref<{ y: number; day: number; side: Side } | null>(null);
 const dragging = ref(false);
 const query = ref("");
 const searchOpen = ref(false);
@@ -148,7 +164,35 @@ const activeResult = ref(0);
 const searchWrap = ref<HTMLElement | null>(null);
 const originInput = ref<HTMLInputElement | null>(null);
 
-const axisMargin = computed(() => Math.min(180, Math.max(110, width.value * 0.26)));
+/** 窄屏放不下并排的两条时间线时改为上下堆叠 */
+const stacked = computed(() => width.value < 720);
+
+/** 单条时间线的尺寸：并排时各占一半宽度，堆叠时各占一半高度 */
+const panelWidth = computed(() =>
+  stacked.value ? width.value : Math.max(160, (width.value - PANEL_GAP) / 2),
+);
+const panelHeight = computed(() =>
+  stacked.value ? Math.max(120, (height.value - PANEL_GAP) / 2) : height.value,
+);
+
+/** 轴线可移动的左右边界，保证标签与日期气泡都还有落脚处 */
+const axisMargin = computed(() =>
+  Math.min(120, Math.max(56, panelWidth.value * 0.22)),
+);
+
+/** 标签排在轴线的哪一侧：并排时英国在左、美国在右；堆叠时统一在右 */
+const labelSide = (side: Side): "left" | "right" =>
+  stacked.value || side === "us" ? "right" : "left";
+
+/** 轴线默认位置：并排时两条线在中间靠拢，堆叠时都靠左留出标签空间 */
+const axisDefault = (side: Side) =>
+  panelWidth.value * (labelSide(side) === "left" ? 1 - AXIS_RATIO : AXIS_RATIO);
+
+/** 面板在画布中的起点，面板内部坐标都相对它计算 */
+const panelLeft = (side: Side) =>
+  stacked.value || side === "uk" ? 0 : panelWidth.value + PANEL_GAP;
+const panelTop = (side: Side) =>
+  stacked.value && side === "us" ? panelHeight.value + PANEL_GAP : 0;
 
 const unitDays = computed(() => UNIT_DAYS[unit.value]);
 
@@ -171,19 +215,30 @@ function fromP(position: number): number {
   return logOrigin.value + offsetOfP(position);
 }
 
-const plotHeight = computed(() => Math.max(1, height.value - PLOT_PAD * 2));
+/** 绘图区高度：面板去掉表头后的部分 */
+const plotArea = computed(() =>
+  Math.max(1, panelHeight.value - PANEL_HEADER),
+);
+
+/** 绘图区上下留白：面板变矮时同步收窄，避免留白吃掉可视高度 */
+const plotPad = computed(() => Math.min(PLOT_PAD, plotArea.value * 0.18));
+
+const plotHeight = computed(() =>
+  Math.max(1, plotArea.value - plotPad.value * 2),
+);
 
 /** 基准线所在高度：始终画在选中日期上，随内容平移、缩放与反向移动 */
 const midY = computed(() => yOfDay(logOrigin.value));
 
+/** 纵向映射都在面板内部坐标系里进行，渲染时再加面板偏移 */
 const yOfP = (position: number) =>
-  PLOT_PAD +
+  plotPad.value +
   ((dir.value * (position - center.value) + span.value / 2) / span.value) *
     plotHeight.value;
 
 const pOfY = (y: number) =>
   center.value +
-  dir.value * (((y - PLOT_PAD) / plotHeight.value - 0.5) * span.value);
+  dir.value * (((y - plotPad.value) / plotHeight.value - 0.5) * span.value);
 
 const yOfDay = (day: number) => yOfP(pOf(day));
 const dayOfY = (y: number) => fromP(pOfY(y));
@@ -223,8 +278,12 @@ function clampView() {
   }
 }
 
-function clampAxis() {
-  axisX.value = clamp(axisX.value, axisMargin.value, width.value - axisMargin.value);
+function clampAxis(side: Side) {
+  axisX[side] = clamp(
+    axisX[side],
+    axisMargin.value,
+    panelWidth.value - axisMargin.value,
+  );
 }
 
 function fitAll() {
@@ -233,7 +292,8 @@ function fitAll() {
   const high = pOf(DATA_MAX);
   span.value = Math.max(minSpan.value, high - low);
   center.value = (low + high) / 2;
-  axisX.value = width.value / 2;
+  // 全览同时把两条轴线放回各自面板的默认位置
+  for (const side of SIDES) axisX[side] = axisDefault(side);
   selected.value = null;
   clampView();
 }
@@ -313,9 +373,34 @@ function useEventOrigin(day: number) {
   clampView();
 }
 
+/** 指针落在哪条时间线上：优先看最近的 data-side 容器，落在间隙时按位置就近归属 */
+function sideOf(
+  target: EventTarget | null,
+  clientX?: number,
+  clientY?: number,
+): Side {
+  const el = target as HTMLElement | null;
+  const marked = el?.closest<HTMLElement>("[data-side]")?.dataset.side;
+  if (marked === "uk" || marked === "us") return marked;
+  if (clientX === undefined) return "us";
+  const rect = viewport.value?.getBoundingClientRect();
+  if (stacked.value) {
+    const y = (clientY ?? 0) - (rect?.top ?? 0);
+    return y < panelHeight.value ? "uk" : "us";
+  }
+  const x = clientX - (rect?.left ?? 0);
+  return x < panelWidth.value ? "uk" : "us";
+}
+
+/** 把视口坐标换算成某条时间线面板内的纵向坐标 */
+function localY(clientY: number, side: Side): number {
+  const rect = viewport.value?.getBoundingClientRect();
+  return clientY - (rect?.top ?? 0) - panelTop(side) - PANEL_HEADER;
+}
+
 function zoomAt(factor: number, y: number) {
   const next = clamp(span.value / factor, minSpan.value, maxSpan.value);
-  const ratio = (y - PLOT_PAD) / plotHeight.value;
+  const ratio = (y - plotPad.value) / plotHeight.value;
   // 锚点日期保持不动，基准日不变，基准线随内容移到新位置
   const anchorDay = dayOfY(y);
   center.value = pOf(anchorDay) - dir.value * (ratio - 0.5) * next;
@@ -324,13 +409,11 @@ function zoomAt(factor: number, y: number) {
 }
 
 function onAxisWheel(event: WheelEvent) {
-  const el = viewport.value;
-  if (!el) return;
-  const rect = el.getBoundingClientRect();
+  const side = sideOf(event.currentTarget, event.clientX, event.clientY);
   const y = clamp(
-    event.clientY - rect.top,
-    PLOT_PAD,
-    Math.max(PLOT_PAD, height.value - PLOT_PAD),
+    localY(event.clientY, side),
+    plotPad.value,
+    Math.max(plotPad.value, plotArea.value - plotPad.value),
   );
   zoomAt(Math.exp(-event.deltaY * 0.002), y);
 }
@@ -360,6 +443,8 @@ let drag: {
   center: number;
   origin: number;
   span: number;
+  side: Side;
+  panelTop: number;
   axisX: number;
   mode: "axis" | "time" | "mid" | null;
 } | null = null;
@@ -378,12 +463,14 @@ function onPointerMove(event: PointerEvent) {
 
   moved = true;
   if (drag.mode === "axis") {
-    axisX.value = drag.axisX + dx;
-    clampAxis();
+    // 只移动指针所在那条时间线的轴线，另一条保持不动
+    axisX[drag.side] = drag.axisX + dx;
+    clampAxis(drag.side);
   } else if (drag.mode === "mid") {
     // 基准线搬到指针处并选中该日期：按拖拽起点的布局换算，避免逐帧叠加失真
     const ratio = clamp(
-      (event.clientY - drag.top - PLOT_PAD) / plotHeight.value,
+      (event.clientY - drag.top - drag.panelTop - PANEL_HEADER - plotPad.value) /
+        plotHeight.value,
       0.05,
       0.95,
     );
@@ -420,12 +507,15 @@ function onPointerDown(event: PointerEvent) {
   const target = event.target as HTMLElement | null;
   if (target?.closest("button, a")) return;
 
+  // 指针落在哪条时间线上，就只操作那条线的轴线
+  const side = sideOf(target, event.clientX, event.clientY);
+  const top = viewport.value?.getBoundingClientRect().top ?? 0;
+  const panelTopY = panelTop(side);
+
   // 基准线在两种分布下都可抓取：气泡本身或线上下几条像素
-  const rect = viewport.value?.getBoundingClientRect();
-  const top = rect?.top ?? 0;
   const onMidline =
     Boolean(target?.closest(".axis__midline")) ||
-    Math.abs(event.clientY - top - midY.value) <= 8;
+    Math.abs(event.clientY - top - panelTopY - PANEL_HEADER - midY.value) <= 8;
 
   selected.value = null;
   drag = {
@@ -435,7 +525,9 @@ function onPointerDown(event: PointerEvent) {
     center: center.value,
     origin: logOrigin.value,
     span: span.value,
-    axisX: axisX.value,
+    side,
+    panelTop: panelTopY,
+    axisX: axisX[side],
     mode: onMidline ? "mid" : null,
   };
   dragging.value = true;
@@ -488,12 +580,14 @@ watch(selected, async (id) => {
 });
 
 function onAxisMove(event: PointerEvent) {
-  const el = viewport.value;
-  if (!el) return;
-  const rect = el.getBoundingClientRect();
-  const y = clamp(event.clientY - rect.top, 0, rect.height || height.value);
-  const plotY = clamp(y, PLOT_PAD, Math.max(PLOT_PAD, height.value - PLOT_PAD));
-  hover.value = { y, day: dayOfY(plotY) };
+  const side = sideOf(event.currentTarget, event.clientX, event.clientY);
+  const y = clamp(localY(event.clientY, side), 0, plotArea.value);
+  const plotY = clamp(
+    y,
+    plotPad.value,
+    Math.max(plotPad.value, plotArea.value - plotPad.value),
+  );
+  hover.value = { y, day: dayOfY(plotY), side };
 }
 
 function clearHover() {
@@ -509,13 +603,13 @@ interface Tick {
 }
 
 const ticks = computed<Tick[]>(() => {
-  // 按整块画布而非可视区生成刻度，虚线一直画到画布边缘再由 overflow 裁剪
-  const canvasStart = dayOfY(height.value);
+  // 按整块面板而非可视区生成刻度，虚线一直画到面板边缘再由 overflow 裁剪
+  const canvasStart = dayOfY(plotArea.value);
   const canvasEnd = dayOfY(0);
   const start = Math.min(canvasStart, canvasEnd);
   const end = Math.max(canvasStart, canvasEnd);
   const days = Math.max(1, end - start);
-  const px = Math.max(1, height.value);
+  const px = Math.max(1, plotArea.value);
   const raw: { day: number; label: string }[] = [];
 
   if (days > YEAR_DAYS * 3) {
@@ -623,41 +717,68 @@ const placed = computed<Record<Side, Placed[]>>(() => {
   return result;
 });
 
-/** 标签与轴线之间的水平连线 */
-const links = computed(() => {
-  const out: { id: number; side: Side; y: number; x2: number }[] = [];
+/** 标签与轴线之间的水平连线，坐标相对各自面板 */
+const links = computed<Record<Side, { id: number; y: number; x1: number; x2: number }[]>>(
+  () => {
+    const out = { uk: [], us: [] } as Record<
+      Side,
+      { id: number; y: number; x1: number; x2: number }[]
+    >;
 
-  for (const side of SIDES) {
-    const x2 = side === "uk" ? axisX.value - AXIS_GAP : axisX.value + AXIS_GAP;
-    for (const event of placed.value[side]) {
-      out.push({ id: event.id, side, y: event.anchor, x2 });
+    for (const side of SIDES) {
+      const x1 = axisX[side];
+      const x2 = x1 + (labelSide(side) === "left" ? -AXIS_GAP : AXIS_GAP);
+      for (const event of placed.value[side]) {
+        out[side].push({ id: event.id, y: event.anchor, x1, x2 });
+      }
     }
-  }
 
-  return out;
-});
+    return out;
+  },
+);
 
 /** 区间线段：标签被遮挡筛选隐藏时，时间跨度本身仍如实显示 */
-const ranges = computed(() => {
-  const out: { id: number; side: Side; x: number; y1: number; y2: number }[] =
-    [];
+const ranges = computed<Record<Side, { id: number; x: number; y1: number; y2: number }[]>>(
+  () => {
+    const out = { uk: [], us: [] } as Record<
+      Side,
+      { id: number; x: number; y1: number; y2: number }[]
+    >;
 
-  for (const side of SIDES) {
-    const x = axisX.value + (side === "uk" ? -RANGE_OFFSET : RANGE_OFFSET);
-    for (const event of events) {
-      if (event.side !== side || event.endDay === null) continue;
-      out.push({
-        id: event.id,
-        side,
-        x,
-        y1: yOfDay(event.day),
-        y2: yOfDay(event.endDay),
-      });
+    for (const side of SIDES) {
+      const x =
+        axisX[side] + (labelSide(side) === "left" ? -RANGE_OFFSET : RANGE_OFFSET);
+      for (const event of events) {
+        if (event.side !== side || event.endDay === null) continue;
+        out[side].push({
+          id: event.id,
+          x,
+          y1: yOfDay(event.day),
+          y2: yOfDay(event.endDay),
+        });
+      }
     }
-  }
 
+    return out;
+  },
+);
+
+/** 每条时间线的事件总数，显示在面板标题上 */
+const totals = computed<Record<Side, number>>(() => {
+  const out: Record<Side, number> = { uk: 0, us: 0 };
+  for (const event of events) out[event.side] += 1;
   return out;
 });
+
+/** 面板在画布中的位置与尺寸：并排时左右分栏，堆叠时上下分栏 */
+function panelStyle(side: Side) {
+  return {
+    left: `${panelLeft(side)}px`,
+    top: `${panelTop(side)}px`,
+    width: `${panelWidth.value}px`,
+    height: `${panelHeight.value}px`,
+  };
+}
 
 /** 卡片与搜索使用的完整日期；区间事件给出两个端点 */
 const detailStamp = (event: AxisEvent) =>
@@ -754,52 +875,54 @@ function locate(event: AxisEvent) {
   searchOpen.value = false;
 }
 
-/** 卡片取代气泡出现在同一位置：贴向轴线一侧，并保证整体留在画布内 */
+/** 卡片取代气泡出现在同一位置：排在轴线外侧，并保证整体留在面板内 */
 function cardStyle(event: Placed) {
-  const room =
-    event.side === "uk"
-      ? axisX.value - AXIS_GAP
-      : width.value - axisX.value - AXIS_GAP;
-  const maxWidth = width.value - CARD_PAD * 2;
+  const x = axisX[event.side];
+  const left = labelSide(event.side) === "left";
+  const room = left ? x - AXIS_GAP : panelWidth.value - x - AXIS_GAP;
+  const maxWidth = panelWidth.value - CARD_PAD * 2;
   const cardWidth = clamp(
     Math.min(room, CARD_MAX_WIDTH),
     Math.min(CARD_MIN_WIDTH, maxWidth),
     maxWidth,
   );
-  const preferred =
-    event.side === "uk"
-      ? axisX.value - AXIS_GAP - cardWidth
-      : axisX.value + AXIS_GAP;
-  const left = clamp(preferred, CARD_PAD, width.value - CARD_PAD - cardWidth);
+  const preferred = left ? x - AXIS_GAP - cardWidth : x + AXIS_GAP;
+  const cardLeft = clamp(
+    preferred,
+    CARD_PAD,
+    panelWidth.value - CARD_PAD - cardWidth,
+  );
   const half = Math.max(
     48,
     Math.min(
       event.anchor - CARD_PAD,
-      height.value - event.anchor - CARD_PAD,
+      plotArea.value - event.anchor - CARD_PAD,
     ),
   );
   const top = clamp(
     event.anchor,
     CARD_PAD + half,
-    height.value - CARD_PAD - half,
+    plotArea.value - CARD_PAD - half,
   );
 
   return {
-    left: `${left}px`,
+    left: `${cardLeft}px`,
     top: `${top}px`,
     width: `${cardWidth}px`,
     maxHeight: `${half * 2}px`,
   };
 }
 
+/** 标签排在轴线外侧，坐标相对所在面板 */
 function labelStyle(event: Placed) {
-  return event.side === "uk"
+  const x = axisX[event.side];
+  return labelSide(event.side) === "left"
     ? {
-        right: `${Math.max(0, width.value - axisX.value + AXIS_GAP)}px`,
+        right: `${panelWidth.value - x + AXIS_GAP}px`,
         top: `${event.labelTop}px`,
       }
     : {
-        left: `${Math.max(0, axisX.value + AXIS_GAP)}px`,
+        left: `${x + AXIS_GAP}px`,
         top: `${event.labelTop}px`,
       };
 }
@@ -816,18 +939,22 @@ const hoverText = computed(() => {
   };
 });
 
-const readoutRight = computed(() => axisX.value <= width.value / 2);
+/** 读数气泡放在轴线外侧 */
+const readoutRight = computed(
+  () => !hover.value || labelSide(hover.value.side) === "right",
+);
 
 const hoverReadoutStyle = computed(() => {
-  if (!hoverText.value) return {};
+  if (!hoverText.value || !hover.value) return {};
+  const x = axisX[hover.value.side];
   return readoutRight.value
     ? {
         top: `${hoverText.value.y}px`,
-        left: `${axisX.value + AXIS_GAP}px`,
+        left: `${x + AXIS_GAP}px`,
       }
     : {
         top: `${hoverText.value.y}px`,
-        right: `${Math.max(0, width.value - axisX.value + AXIS_GAP)}px`,
+        right: `${Math.max(0, panelWidth.value - x + AXIS_GAP)}px`,
       };
 });
 
@@ -836,11 +963,16 @@ let observer: ResizeObserver | undefined;
 function syncSize() {
   const el = viewport.value;
   if (!el) return;
-  const wasCentered = Math.abs(axisX.value - width.value / 2) < 2;
+  const wasDefault = SIDES.every(
+    (side) => Math.abs(axisX[side] - axisDefault(side)) < 2,
+  );
   width.value = Math.max(320, el.clientWidth);
   height.value = Math.max(120, el.clientHeight);
-  if (wasCentered) axisX.value = width.value / 2;
-  clampAxis();
+  // 尺寸变化后轴线仍停在默认位置时，跟着新的面板宽度重新对齐
+  if (wasDefault) {
+    for (const side of SIDES) axisX[side] = axisDefault(side);
+  }
+  for (const side of SIDES) clampAxis(side);
 }
 
 onMounted(() => {
@@ -865,150 +997,164 @@ onBeforeUnmount(() => {
     <div
       ref="viewport"
       class="axis"
-      :class="{ 'is-dragging': dragging }"
+      :class="{ 'is-dragging': dragging, 'is-stacked': stacked }"
       @pointerdown="onPointerDown"
       @wheel.prevent="onCanvasWheel"
     >
-      <i
-        v-for="tick in ticks"
-        :key="tick.day"
-        class="axis__tick"
-        :style="{ top: `${tick.y}px` }"
+      <section
+        v-for="side in SIDES"
+        :key="side"
+        class="panel"
+        :class="`is-${side}`"
+        :data-side="side"
+        :style="panelStyle(side)"
       >
-        <span v-if="tick.showLabel">{{ tick.label }}</span>
-      </i>
+        <p class="panel__title" :style="{ height: `${PANEL_HEADER}px` }">
+          <b>{{ laneLabel(side) }}</b>
+          <span>{{ totals[side] }} 个事件</span>
+        </p>
 
-      <div class="axis__spine" :style="{ left: `${axisX}px` }"></div>
+        <div class="panel__plot" :style="{ top: `${PANEL_HEADER}px` }">
+          <i
+            v-for="tick in ticks"
+            :key="tick.day"
+            class="axis__tick"
+            :style="{ top: `${tick.y}px` }"
+          >
+            <span v-if="tick.showLabel">{{ tick.label }}</span>
+          </i>
 
-      <svg
-        class="axis__links"
-        :width="width"
-        :height="height"
-        aria-hidden="true"
-      >
-        <line
-          v-for="range in ranges"
-          :key="`range-${range.id}`"
-          class="axis__range"
-          :class="range.side"
-          :x1="range.x"
-          :x2="range.x"
-          :y1="range.y1"
-          :y2="range.y2"
-        ></line>
-        <line
-          v-for="link in links"
-          :key="link.id"
-          :class="link.side"
-          :x1="axisX"
-          :x2="link.x2"
-          :y1="link.y"
-          :y2="link.y"
-        ></line>
-      </svg>
+          <div class="axis__spine" :style="{ left: `${axisX[side]}px` }"></div>
 
-      <div
-        class="axis__today"
-        :class="{ 'is-lifted': Math.abs(todayY - midY) < 24 }"
-        :style="{ top: `${todayY}px` }"
-      >
-        <span>今天</span>
-      </div>
+          <svg
+            class="axis__links"
+            :width="panelWidth"
+            :height="plotArea"
+            aria-hidden="true"
+          >
+            <line
+              v-for="range in ranges[side]"
+              :key="`range-${range.id}`"
+              class="axis__range"
+              :class="side"
+              :x1="range.x"
+              :x2="range.x"
+              :y1="range.y1"
+              :y2="range.y2"
+            ></line>
+            <line
+              v-for="link in links[side]"
+              :key="link.id"
+              :class="side"
+              :x1="link.x1"
+              :x2="link.x2"
+              :y1="link.y"
+              :y2="link.y"
+            ></line>
+          </svg>
 
-      <div class="axis__midline" :style="{ top: `${midY}px` }">
-        <span
-          title="上下拖动基准线，选中指针处的日期"
-          @wheel.prevent.stop="onAxisWheel"
-        >
-          基准 {{ originText }}
-        </span>
-      </div>
-
-      <template v-for="side in SIDES" :key="side">
-        <template v-for="event in placed[side]" :key="event.id">
-          <span
-            class="axis-event__dot"
-            :class="[`is-${side}`, { 'is-l1': event.lvl === 1 }]"
-            :style="{ left: `${axisX}px`, top: `${event.anchor}px` }"
-          ></span>
           <div
-            v-if="selected === event.id"
-            class="axis-event__card"
-            :class="`is-${side}`"
-            role="group"
-            :aria-labelledby="`event-title-${event.id}`"
-            :style="cardStyle(event)"
-            @pointerdown.stop
-            @wheel.stop
+            class="axis__today"
+            :class="{ 'is-lifted': Math.abs(todayY - midY) < 24 }"
+            :style="{ top: `${todayY}px` }"
           >
-            <button
-              class="axis-event__close"
-              type="button"
-              aria-label="收起事件卡片"
-              @click.stop="closeCard"
-            >
-              ×
-            </button>
-            <button
-              class="axis-event__origin"
-              :class="{ 'is-on': Math.abs(event.day - logOrigin) < 0.5 }"
-              type="button"
-              aria-label="把该事件移到基准线作为对数基准"
-              title="把该事件移到基准线作为对数基准"
-              @click.stop="useEventOrigin(event.day)"
-            >
-              <svg viewBox="0 0 16 16" aria-hidden="true">
-                <circle cx="8" cy="8" r="3.2"></circle>
-                <path d="M8 1v2.6M8 12.4V15M1 8h2.6M12.4 8H15"></path>
-              </svg>
-            </button>
-            <p class="axis-event__meta">
-              <b>{{ detailStamp(event) }}</b> · {{ laneLabel(side) }} ·
-              {{ event.tag }} · L{{ event.lvl }}
-            </p>
-            <h3 :id="`event-title-${event.id}`" class="axis-event__title">
-              {{ event.title }}
-            </h3>
-            <p class="axis-event__desc">{{ event.desc }}</p>
+            <span>今天</span>
           </div>
-          <button
-            v-else
-            class="axis-event__label"
-            :class="[`is-${side}`, { 'is-l1': event.lvl === 1 }]"
-            :style="labelStyle(event)"
-            type="button"
-            :data-event="event.id"
-            :title="`${labelStamp(event)} ${event.title}`"
-            @click.stop="pick(event.id)"
+
+          <div class="axis__midline" :style="{ top: `${midY}px` }">
+            <span
+              title="上下拖动基准线，选中指针处的日期"
+              @wheel.prevent.stop="onAxisWheel"
+            >
+              基准 {{ originText }}
+            </span>
+          </div>
+
+          <template v-for="event in placed[side]" :key="event.id">
+            <span
+              class="axis-event__dot"
+              :class="[`is-${side}`, { 'is-l1': event.lvl === 1 }]"
+              :style="{ left: `${axisX[side]}px`, top: `${event.anchor}px` }"
+            ></span>
+            <div
+              v-if="selected === event.id"
+              class="axis-event__card"
+              :class="`is-${side}`"
+              role="group"
+              :aria-labelledby="`event-title-${event.id}`"
+              :style="cardStyle(event)"
+              @pointerdown.stop
+              @wheel.stop
+            >
+              <button
+                class="axis-event__close"
+                type="button"
+                aria-label="收起事件卡片"
+                @click.stop="closeCard"
+              >
+                ×
+              </button>
+              <button
+                class="axis-event__origin"
+                :class="{ 'is-on': Math.abs(event.day - logOrigin) < 0.5 }"
+                type="button"
+                aria-label="把该事件移到基准线作为对数基准"
+                title="把该事件移到基准线作为对数基准"
+                @click.stop="useEventOrigin(event.day)"
+              >
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <circle cx="8" cy="8" r="3.2"></circle>
+                  <path d="M8 1v2.6M8 12.4V15M1 8h2.6M12.4 8H15"></path>
+                </svg>
+              </button>
+              <p class="axis-event__meta">
+                <b>{{ detailStamp(event) }}</b> · {{ laneLabel(side) }} ·
+                {{ event.tag }} · L{{ event.lvl }}
+              </p>
+              <h3 :id="`event-title-${event.id}`" class="axis-event__title">
+                {{ event.title }}
+              </h3>
+              <p class="axis-event__desc">{{ event.desc }}</p>
+            </div>
+            <button
+              v-else
+              class="axis-event__label"
+              :class="[`is-${side}`, { 'is-l1': event.lvl === 1 }]"
+              :style="labelStyle(event)"
+              type="button"
+              :data-event="event.id"
+              :title="`${labelStamp(event)} ${event.title}`"
+              @click.stop="pick(event.id)"
+            >
+              <b>{{ labelStamp(event) }}</b><span>{{ event.title }}</span>
+            </button>
+          </template>
+
+          <i
+            v-if="hover && hover.side === side"
+            class="axis__cursor"
+            :style="{ top: `${hover.y}px` }"
+          ></i>
+
+          <div
+            v-if="hoverText && hover && hover.side === side"
+            class="axis__readout"
+            :class="readoutRight ? 'is-right' : 'is-left'"
+            :style="hoverReadoutStyle"
           >
-            <b>{{ labelStamp(event) }}</b><span>{{ event.title }}</span>
-          </button>
-        </template>
-      </template>
+            <b>{{ hoverText.year }}</b>
+            <span>{{ hoverText.full }}</span>
+          </div>
 
-      <i
-        v-if="hover"
-        class="axis__cursor"
-        :style="{ top: `${hover.y}px` }"
-      ></i>
-
-      <div
-        v-if="hoverText"
-        class="axis__readout"
-        :class="readoutRight ? 'is-right' : 'is-left'"
-        :style="hoverReadoutStyle"
-      >
-        <b>{{ hoverText.year }}</b>
-        <span>{{ hoverText.full }}</span>
-      </div>
-
-      <div
-        class="axis__band"
-        :style="{ left: `${axisX - 32}px` }"
-        @wheel.prevent.stop="onAxisWheel"
-        @pointermove="onAxisMove"
-        @pointerleave="clearHover"
-      ></div>
+          <div
+            class="axis__band"
+            :style="{ left: `${axisX[side] - 32}px` }"
+            @wheel.prevent.stop="onAxisWheel"
+            @pointermove="onAxisMove"
+            @pointerleave="clearHover"
+          ></div>
+        </div>
+      </section>
     </div>
     <div class="toolbar">
       <div ref="searchWrap" class="search" role="search">

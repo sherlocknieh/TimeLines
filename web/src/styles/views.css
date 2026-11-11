@@ -242,13 +242,12 @@ body {
 }
 
 /* ---------- 缩放时间轴 ---------- */
+/* 画布只负责摆放两条时间线，纵向映射与交互都在各自面板内完成 */
 .axis {
   position: relative;
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
-  /* 建立独立的层叠上下文：虚线网格固定在 z-index 0 当背景，内容层从 1 起，虚线永不遮挡元素 */
-  isolation: isolate;
   background:
     radial-gradient(900px 520px at 50% 50%, #fffdf8 0%, transparent 72%),
     linear-gradient(180deg, #fffdf9, #faf5e9);
@@ -256,6 +255,59 @@ body {
   touch-action: none;
   user-select: none;
 }
+
+/* 一条时间线：英国史与美国史各占一个面板，共用同一套时间视野 */
+.panel {
+  position: absolute;
+  overflow: hidden;
+  /* 建立独立的层叠上下文：虚线网格固定在 z-index 0 当背景，内容层从 1 起，虚线永不遮挡元素 */
+  isolation: isolate;
+  background:
+    radial-gradient(520px 420px at 50% 50%, #fffdf8 0%, transparent 74%),
+    linear-gradient(180deg, #fffdf9, #faf5e9);
+}
+/* 并排时用一条细线分隔两条时间线 */
+.axis:not(.is-stacked) .panel.is-us {
+  border-left: 1px solid var(--line-soft);
+}
+.axis.is-stacked .panel.is-us {
+  border-top: 1px solid var(--line-soft);
+}
+
+.panel__title {
+  position: absolute;
+  top: 0;
+  left: 14px;
+  align-items: center;
+  z-index: 8;
+  display: flex;
+  gap: 7px;
+  margin: 0;
+  pointer-events: none;
+}
+
+/* 绘图区：面板去掉表头后的部分，内部坐标都相对它计算 */
+.panel__plot {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  isolation: isolate;
+}
+.panel__title b {
+  font-family: var(--serif);
+  font-size: 0.92rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.panel__title span {
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+}
+.panel.is-uk .panel__title b { color: var(--uk); }
+.panel.is-us .panel__title b { color: var(--us); }
+
 /* 抓取中的手型覆盖所有可拖区域，包括基准线气泡 */
 .axis.is-dragging,
 .axis.is-dragging .axis__band,

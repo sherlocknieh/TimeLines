@@ -17,7 +17,7 @@ TimeLines 是一个通用的时间线整理与可视化工具。仓库同时生�
 | --- | --- |
 | 改交互或显示逻辑 | `docs/views.mdx` 先确认交互契约，再进 `web/src/views/ZoomView.vue` |
 | 加减事件、改数据字段 | `web/src/data/events.ts` |
-| 改泳道标签、通用工具 | `web/src/lib/dataset.ts` |
+| 改时间线标签、通用工具 | `web/src/lib/dataset.ts` |
 | 改标签遮挡筛选 | `web/src/lib/timeline.ts` |
 | 改文档内容 | `docs/*.mdx`，Blume 按文件树自动生成路由与侧边栏 |
 | 改开发/构建流程 | `.dev/*.mjs`、`blume.config.ts`、`web/vite.config.ts` |
@@ -33,7 +33,7 @@ web/src/
 ├── views/
 │   └── ZoomView.vue      竖向缩放轴及其全部交互
 ├── data/events.ts        唯一 demo 数据源
-├── lib/dataset.ts        泳道与 clamp 等通用工具
+├── lib/dataset.ts        时间线标签与 clamp 等通用工具
 ├── lib/timeline.ts       标签遮挡筛选 pickVisible
 └── styles/views.css      全局基础样式、外壳与缩放轴样式
 ```
@@ -55,7 +55,7 @@ web/src/
 ```
 
 - `y`：年份，缩放轴用于生成年份标签与遮挡排序；区间事件取起始年。公元前用负数表示，轴上直接显示负号。
-- `s`：`"uk" | "us"`，缺省为 `us`；当前泳道固定为英国、美国两条。
+- `s`：`"uk" | "us"`，缺省为 `us`；当前固定为英国、美国两条时间线，各占一个面板。
 - `lvl`：语义层级，`1` 主脉 / `2` 通史 / `3` 细节，缺省 `2`。它只影响标签字号与重叠时的保留优先级（级别高者优先，同级保留较早者），任何缩放都不按级别隐藏事件。
 - `date`：可选起始日期，可写 `YYYY`、`YYYY-MM` 或 `YYYY-MM-DD`。没有 `date` 的事件按该年 7 月 1 日定位，但只显示年份；不要在展示层给它补月份/日，避免制造虚假精度。
 - `end`：可选区间终点，粒度与 `date` 相同。与 `date` 同时出现即表示区间事件：轴线一侧画出起止线段，标签锚定起点，卡片与搜索展示完整起止日期。标签遮挡筛选只作用于标签，区间线段始终显示。
@@ -100,4 +100,4 @@ pnpm build
 
 已经完成：单一缩放时间轴视图、hash 路由、数据驱动的年份范围、语义层级与线性/对数切换、以基准线为基准的对数、事件搜索与定位。
 
-仍是 demo 定制、尚未通用化：任意数量泳道、时间线的创建/切换/持久化、事件增删改与 JSON 导入导出。详见 `README.md` 的 TODO 与 `docs/index.mdx` 的「通用化路线」。
+仍是 demo 定制、尚未通用化：任意数量时间线、时间线的创建/切换/持久化、事件增删改与 JSON 导入导出。详见 `README.md` 的 TODO 与 `docs/index.mdx` 的「通用化路线」。
