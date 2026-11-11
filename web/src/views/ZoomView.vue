@@ -490,12 +490,13 @@ function laneSpan(lane: LaneId): number {
   return Math.abs(pOf(to) - pOf(from));
 }
 
-/** 区段占满画布高度的比例达到这个值就算已到全览，避免差几个像素时白双击一次 */
-const LANE_FIT_RATIO = 0.98;
+/** 全览判定留出的像素容差：区段铺满画布后差几像素也算已到全览 */
+const LANE_FIT_SLACK = 4;
 
-/** 这条时间线是否已经放大到全览：区段铺满画布，或视野比它更窄 */
+/** 这条时间线是否已经放大到全览：它的区段已经铺满画布高度 */
 const laneFitted = (lane: LaneId): boolean =>
-  laneSpan(lane) >= span.value * LANE_FIT_RATIO;
+  (laneSpan(lane) / span.value) * plotHeight.value >=
+  plotHeight.value - LANE_FIT_SLACK;
 
 function fitLane(lane: LaneId) {
   const { from, to } = laneBounds.value[lane];
@@ -520,10 +521,11 @@ function onCanvasDblClick(event: MouseEvent) {
   const hits = LANES.map((item) => item.id).filter((id) =>
     inAxisBand(id, event.clientX, event.clientY),
   );
+  if (hits.length === 0) return;
   // 父轴区段包含子轴，命中列表的跨度天然由大到小：
   // 先放大还没到全览的最外层时间线，父轴已经铺满时才落到下一层子轴；
-  // 命中的轴都已铺满时回到最外层，双击在层级之间来回切换
-  const next = hits.find((id) => !laneFitted(id)) ?? hits[0];
+  // 命中的轴都已铺满时停在最深的子轴，重复双击不再改变视野
+  const next = hits.find((id) => !laneFitted(id)) ?? hits[hits.length - 1];
   fitLane(next);
 }
 
@@ -1086,68 +1088,66 @@ const totals = computed<Record<LaneId, number>>(() => {
 const NODE_HEIGHT = 30;
 const NODE_OPEN_HEIGHT = 48;
 const NODE_WIDTH_ESTIMATE = 130;
-const NODE_STACK_GAP = 6;
+const NODE_STACK_GAP = 8;
 
 /** 气泡当前估算高度：展开态多了起止输入那一行 */
 const nodeHeight = (lane: LaneId): number =>
   editingLane.value === lane ? NODE_OPEN_HEIGHT : NODE_HEIGHT;
 
-/** 两条轴的气泡是否横向会撞上：只有横向重叠才需要上下避让 */
-function nodeOverlapsX(a: LaneId, b: LaneId): boolean {
-  const gap = NODE_WIDTH_ESTIMATE + 8;
-  return Math.abs(axisAt(a) - axisAt(b)) < gap;
-}
+/** 气泡的右边缘：默认贴在轴左侧 8px，槽位每加一格再向左让一个气泡宽度 */
+const nodeRight = (lane: LaneId, slot: number): number =>
+  axisAt(lane) - 8 - slot * (NODE_WIDTH_ESTIMATE + NODE_STACK_GAP);
 
 /**
- * 气泡都骑在自己时间线的起始端上；只有起点真正重合且横向相邻时才会互相遮挡，
- * 此时深层时间线留在起始端，父级（以及同起点的后来者）向远古方向依次让出槽位。
+ * 气泡都骑在自己时间线的起始端上，默认贴轴左侧。
+ * 起点重合的气泡会在同一高度横向上互相遮挡，此时深层时间线留在起始端，
+ * 父级（以及同起点的后来者）向左依次让开一个气泡宽度。
  */
 const nodeSlots = computed<Record<LaneId, number>>(() => {
   const out: Record<LaneId, number> = {};
-  const used: { lane: LaneId; base: number; y: number; height: number }[] = [];
-  // 槽位按展开态的高度留足，展开时气泡不会把后续槽位再挤开
-  const step = -(NODE_OPEN_HEIGHT + NODE_STACK_GAP) * dir.value;
+  const used: { lane: LaneId; base: number; x: number; height: number }[] = [];
   // 深的先占位，同层按 LANES 顺序；让后来者（尤其是父级）往外让
   const order = [...LANES].sort((a, b) => b.depth - a.depth);
   for (const { id } of order) {
     const base = yOfDay(laneBounds.value[id].from);
     const height = nodeHeight(id);
     let slot = 0;
-    // 只避让同一位置的气泡，近邻各就各位，不会连锁推挤
+    // 只避让起点重合且横向会撞上的气泡，近邻各就各位，不会连锁推挤
     while (
-      used.some(
-        (other) =>
+      used.some((other) => {
+        const x = nodeRight(id, slot);
+        return (
           Math.abs(other.base - base) < 1 &&
-          nodeOverlapsX(other.lane, id) &&
-          Math.abs(other.y - (base + slot * step)) <
-            (other.height + height) / 2 + NODE_STACK_GAP,
-      )
+          Math.abs(other.x - x) < NODE_WIDTH_ESTIMATE + NODE_STACK_GAP &&
+          Math.abs(other.height - height) < NODE_HEIGHT
+        );
+      })
     ) {
       slot += 1;
     }
     out[id] = slot;
-    used.push({ lane: id, base, y: base + slot * step, height });
+    used.push({ lane: id, base, x: nodeRight(id, slot), height });
   }
   return out;
 });
 
 /**
- * 标题气泡在轴线起始端左侧，垂直居中骑在起始端上；重叠时向外错开槽位。
- * 气泡挂在轴左侧，右侧留给事件标签；展开时向左生长，估算宽度只用来防止贴边溢出。
+ * 标题气泡在轴线起始端左侧，垂直居中骑在起始端上；起点重合时向左错开。
+ * 展开时气泡向左生长，估算宽度只用来防止贴边溢出画布。
  */
 function nodeStyle(lane: LaneId): Record<string, string> {
   const startY = yOfDay(laneBounds.value[lane].from);
-  const step = -(NODE_OPEN_HEIGHT + NODE_STACK_GAP) * dir.value;
   const half = nodeHeight(lane) / 2;
   const top = clamp(
-    startY + nodeSlots.value[lane] * step,
+    startY,
     half + 4,
     Math.max(half + 4, plotArea.value - half - 4),
   );
   const estimate =
     editingLane.value === lane ? 200 : NODE_WIDTH_ESTIMATE;
+  // 向左让到位后仍要留在画布内，贴左边缘时允许槽位被压缩
   const right = clamp(
-    width.value - axisAt(lane) + 8,
+    width.value - nodeRight(lane, nodeSlots.value[lane]),
     6,
     Math.max(6, width.value - 6 - estimate),
   );
