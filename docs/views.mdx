@@ -37,7 +37,7 @@ description: TimeLines 目前实现的缩放时间轴及其交互模型。
 
 导航栏右侧的调色盘按钮切换整套配色，共四套：**纸本**（暖米色，默认）、**墨夜**（暖黑）、**青瓷**（冷调浅绿）、**暮蓝**（深蓝）。选择会记在 `localStorage` 的 `timelines:theme` 下，下次打开沿用；从未选择过时跟随系统的深浅色偏好，并在系统切换时实时跟随。
 
-主题只改 `web/src/styles/views.css` 里的一组语义变量（`--paper`、`--surface`、`--ink`、`--line`、`--uk`、`--us`、`--gold` 等），组件样式不出现具体色号。新增主题时在 CSS 里补一组 `:root[data-theme="…"]` 变量，并在 `web/src/lib/theme.ts` 的 `THEMES` 登记名称与预览色板即可。
+主题只改 `web/src/styles/views.css` 里的一组语义变量（`--paper`、`--surface`、`--ink`、`--line`、`--gold` 与时间线色板 `--lane-1…4` 等），组件样式不出现具体色号。新增主题时在 CSS 里补一组 `:root[data-theme="…"]` 变量，并在 `web/src/lib/theme.ts` 的 `THEMES` 登记名称与预览色板即可。时间线颜色按铺平顺序循环取用 `--lane-N`，与具体国家或主题无关。
 
 ## 路由
 

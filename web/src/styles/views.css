@@ -32,11 +32,9 @@
   --line-soft: rgb(160 138 100 / 0.32);
   --line-strong: #cbb996;
   --line-hover: #c3b398;
-  --uk: #9d2235;
-  --us: #1f3f7a;
   /* 时间线配色：按铺平顺序循环取用，数量与 dataset 的 LANE_COLORS 一致 */
-  --lane-1: var(--uk);
-  --lane-2: var(--us);
+  --lane-1: #9d2235;
+  --lane-2: #1f3f7a;
   --lane-3: #2f6b52;
   --lane-4: #8a5a1f;
   --gold: #8f6d2e;
@@ -68,10 +66,8 @@
   --line-soft: rgb(200 180 140 / 0.18);
   --line-strong: #4a4236;
   --line-hover: #5c5244;
-  --uk: #d95f6b;
-  --us: #6f9be0;
-  --lane-1: var(--uk);
-  --lane-2: var(--us);
+  --lane-1: #d95f6b;
+  --lane-2: #6f9be0;
   --lane-3: #6fbf9a;
   --lane-4: #d3a95c;
   --gold: #d3a95c;
@@ -103,10 +99,8 @@
   --line-soft: rgb(110 140 125 / 0.28);
   --line-strong: #b3c6ba;
   --line-hover: #9db8a8;
-  --uk: #a34a4a;
-  --us: #2f6f6a;
-  --lane-1: var(--uk);
-  --lane-2: var(--us);
+  --lane-1: #a34a4a;
+  --lane-2: #2f6f6a;
   --lane-3: #5f7336;
   --lane-4: #7d5f33;
   --gold: #5f7a4c;
@@ -138,10 +132,8 @@
   --line-soft: rgb(140 170 210 / 0.18);
   --line-strong: #3a4759;
   --line-hover: #4b5a70;
-  --uk: #e07a86;
-  --us: #6fa8e8;
-  --lane-1: var(--uk);
-  --lane-2: var(--us);
+  --lane-1: #e07a86;
+  --lane-2: #6fa8e8;
   --lane-3: #6fd0b0;
   --lane-4: #d9b26a;
   --gold: #d9b26a;
@@ -192,7 +184,7 @@ body {
   width: 100%;
   transform: scaleX(0);
   transform-origin: 0 50%;
-  background: linear-gradient(90deg, var(--uk), var(--gold) 50%, var(--us));
+  background: linear-gradient(90deg, var(--lane-1), var(--gold) 50%, var(--lane-2));
   transition: transform 0.1s linear;
 }
 
@@ -744,7 +736,6 @@ body {
 }
 .axis-event__label span {
   min-width: 0;
-  max-width: 160px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
