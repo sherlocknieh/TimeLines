@@ -973,7 +973,6 @@ const totals = computed<Record<LaneId, number>>(() => {
 const NODE_HEIGHT = 30;
 const NODE_OPEN_HEIGHT = 48;
 const NODE_WIDTH_ESTIMATE = 130;
-const NODE_STACK_GAP = 8;
 
 /** 气泡当前估算高度：展开态多了起止输入那一行 */
 const nodeHeight = (lane: LaneId): number =>
@@ -982,39 +981,65 @@ const nodeHeight = (lane: LaneId): number =>
 /** 气泡与轴线之间的横向距离，和事件标签一致，留给连接线 */
 const NODE_OFFSET = AXIS_GAP;
 
-/** 气泡的右边缘：默认贴在轴左侧一段距离，槽位每加一格再向左让一个气泡宽度 */
-const nodeRight = (lane: LaneId, slot: number): number =>
-  axisAt(lane) - NODE_OFFSET - slot * (NODE_WIDTH_ESTIMATE + NODE_STACK_GAP);
+/** 气泡实测宽度：避让按真实宽度算，气泡之间与气泡到轴线保持同一距离 */
+const nodeWidths = reactive<Record<LaneId, number>>({});
+const nodeEls = new Map<LaneId, HTMLElement>();
+const nodeLaneOf = new WeakMap<HTMLElement, LaneId>();
+let nodeObserver: ResizeObserver | undefined;
+
+const nodeWidth = (lane: LaneId): number =>
+  nodeWidths[lane] || NODE_WIDTH_ESTIMATE;
+
+/** 记录气泡元素并跟随其尺寸变化，改名或展开时宽度会变 */
+function setNodeEl(lane: LaneId, el: unknown) {
+  const next = el instanceof HTMLElement ? el : null;
+  const prev = nodeEls.get(lane);
+  if (prev === next) return;
+  if (prev) nodeObserver?.unobserve(prev);
+  if (!next) {
+    nodeEls.delete(lane);
+    return;
+  }
+  nodeEls.set(lane, next);
+  nodeLaneOf.set(next, lane);
+  nodeWidths[lane] = next.offsetWidth;
+  nodeObserver ??= new ResizeObserver((entries) => {
+    for (const entry of entries) {
+      const target = entry.target as HTMLElement;
+      const id = nodeLaneOf.get(target);
+      if (id) nodeWidths[id] = target.offsetWidth;
+    }
+  });
+  nodeObserver.observe(next);
+}
+
+/** 气泡的右边缘：默认贴在自己轴线左侧 */
+const nodeRight = (lane: LaneId): number => axisAt(lane) - NODE_OFFSET;
 
 /**
  * 气泡都骑在自己时间线的起始端上，默认贴轴左侧。
  * 起点重合的气泡会在同一高度横向上互相遮挡，此时深层时间线留在起始端，
- * 父级（以及同起点的后来者）向左依次让开一个气泡宽度。
+ * 父级被连续地推到它们左侧：子轴靠近时父级气泡平滑让位，不会整格跳变。
  */
-const nodeSlots = computed<Record<LaneId, number>>(() => {
+const nodeRights = computed<Record<LaneId, number>>(() => {
   const out: Record<LaneId, number> = {};
-  const used: { lane: LaneId; base: number; x: number; height: number }[] = [];
+  const placed: { lane: LaneId; base: number; right: number; height: number }[] =
+    [];
   // 深的先占位，同层按 LANES 顺序；让后来者（尤其是父级）往外让
   const order = [...LANES].sort((a, b) => b.depth - a.depth);
   for (const { id } of order) {
     const base = yOfDay(laneBounds.value[id].from);
     const height = nodeHeight(id);
-    let slot = 0;
-    // 只避让起点重合且横向会撞上的气泡，近邻各就各位，不会连锁推挤
-    while (
-      used.some((other) => {
-        const x = nodeRight(id, slot);
-        return (
-          Math.abs(other.base - base) < 1 &&
-          Math.abs(other.x - x) < NODE_WIDTH_ESTIMATE + NODE_STACK_GAP &&
-          Math.abs(other.height - height) < NODE_HEIGHT
-        );
-      })
-    ) {
-      slot += 1;
+    let right = nodeRight(id);
+    // 只避让起点重合且高度相近的气泡，取最左的边界，位置随轴线连续变化
+    for (const other of placed) {
+      if (Math.abs(other.base - base) >= 1) continue;
+      if (Math.abs(other.height - height) >= NODE_HEIGHT) continue;
+      const limit = other.right - nodeWidth(other.lane) - AXIS_GAP;
+      if (right > limit) right = limit;
     }
-    out[id] = slot;
-    used.push({ lane: id, base, x: nodeRight(id, slot), height });
+    out[id] = right;
+    placed.push({ lane: id, base, right, height });
   }
   return out;
 });
@@ -1026,7 +1051,7 @@ function nodeCenterY(lane: LaneId): number {
 
 /** 气泡右边缘的画布横坐标：跟着轴线走，移出画布时交给裁剪 */
 function nodeRightX(lane: LaneId): number {
-  return nodeRight(lane, nodeSlots.value[lane]);
+  return nodeRights.value[lane];
 }
 
 /**
@@ -1333,6 +1358,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   observer?.disconnect();
+  nodeObserver?.disconnect();
   window.removeEventListener("keydown", onKeydown);
   window.removeEventListener("pointerdown", onGlobalPointerDown);
   onPointerUp();
@@ -1424,6 +1450,7 @@ onBeforeUnmount(() => {
               class="lane-node"
               :class="editingLane === lane.id ? 'is-open' : 'is-collapsed'"
               :style="nodeStyle(lane.id)"
+              :ref="(el) => setNodeEl(lane.id, el)"
               @pointerdown.stop
             >
               <button
