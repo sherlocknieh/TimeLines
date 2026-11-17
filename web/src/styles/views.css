@@ -468,6 +468,10 @@ body {
   white-space: nowrap;
   cursor: auto;
 }
+/* 展开态是编辑面板，不再是胶囊：圆角收小，说明文字才排得开 */
+.lane-node.is-open {
+  border-radius: 12px;
+}
 /* 小气泡本身就是拖动抓手：整块可拖，点击展开编辑 */
 .lane-node.is-collapsed {
   padding: 0;
@@ -479,6 +483,7 @@ body {
   display: flex;
   align-items: baseline;
   gap: 6px;
+  max-width: 220px;
   padding: 3px 9px 4px;
   border: 1px solid var(--line);
   border-left: 3px solid var(--lane);
@@ -504,6 +509,9 @@ body {
 .lane-node__name-input {
   width: 5.6em;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   padding: 0 2px;
   border: 0;
   border-bottom: 1px dashed transparent;
@@ -530,6 +538,30 @@ body {
   font-size: 0.58rem;
   letter-spacing: 0.06em;
   color: var(--ink-3);
+}
+/* 区间时间线：气泡上直接标出起止，与事件标签同一套写法 */
+.lane-node__stamp {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--ink-2);
+}
+/* 展开态才显示区间时间线的分类与说明 */
+.lane-node__note {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 240px;
+  margin: 0;
+  white-space: normal;
+  font-size: 0.62rem;
+  line-height: 1.5;
+  color: var(--ink-3);
+}
+.lane-node__note b {
+  font-weight: 600;
+  color: var(--ink-2);
 }
 /* 展开态才显示起止输入：平时只留一颗轻量气泡 */
 .lane-node__done {
@@ -591,6 +623,8 @@ body {
 /* 父时间线只作容器：轴线更粗，子时间线细一档，层级一眼可辨 */
 .lane-group.is-parent .axis__spine { width: 3px; margin-left: -1.5px; opacity: 0.75; }
 .lane-group.is-child .axis__spine { opacity: 0.45; }
+/* 区间时间线：轴线就是那段区间本身，画得比普通子轴更实 */
+.lane-group.is-interval .axis__spine { opacity: 0.85; }
 
 /* 父轴与子轴之间的横向连接，标出包含关系 */
 .axis__branch {
@@ -693,11 +727,6 @@ body {
 }
 .axis__links line { stroke-width: 1; }
 .axis__links line { stroke: var(--lane); stroke-opacity: 0.3; }
-.axis__links line.axis__range {
-  stroke-width: 4;
-  stroke-linecap: round;
-}
-.axis__links line.axis__range { stroke-opacity: 0.42; }
 
 .axis-event__dot {
   position: absolute;

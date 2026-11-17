@@ -2,18 +2,13 @@ import tree from "../data/timelines.json";
 
 /** 一个事件就是一条记录，字段与时间轴渲染一一对应 */
 export interface TimelineEvent {
-  /** 年份；区间事件取起始年 */
+  /** 年份 */
   y: number;
   /**
    * 起始日期，可写 YYYY、YYYY-MM 或 YYYY-MM-DD；粒度决定展示精度。
    * 缺省时按该年 7 月 1 日定位，仅显示年份。
    */
   date?: string;
-  /**
-   * 区间终点，粒度与 `date` 相同；与 `date` 同时出现即表示区间事件。
-   * 缺省表示单点事件。
-   */
-  end?: string;
   /**
    * 语义层级：1 主脉、2 通史、3 细节。
    * 缩放时间轴据此决定标签字号与重叠时的保留优先级，缺省为 2。
@@ -34,6 +29,10 @@ export interface TimelineFolder {
   start?: string;
   /** 这条时间线覆盖的终点，写法与事件 `end` 相同，缺省取自身事件范围 */
   end?: string;
+  /** 区间时间线的分类标签，只在标题气泡展开时展示 */
+  tag?: string;
+  /** 区间时间线的说明，只在标题气泡展开时展示 */
+  desc?: string;
   events?: TimelineEvent[];
   folders?: TimelineFolder[];
 }
@@ -51,6 +50,8 @@ export interface Lane {
   depth: number;
   start?: string;
   end?: string;
+  tag?: string;
+  desc?: string;
   events: TimelineEvent[];
 }
 
@@ -65,6 +66,8 @@ function flatten(folders: TimelineFolder[], parent = "", depth = 0): Lane[] {
         depth,
         start: folder.start,
         end: folder.end,
+        tag: folder.tag,
+        desc: folder.desc,
         events: folder.events ?? [],
       },
       ...flatten(folder.folders ?? [], id, depth + 1),

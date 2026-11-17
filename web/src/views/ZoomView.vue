@@ -27,17 +27,12 @@ const DAY_MS = 86_400_000;
 const YEAR_DAYS = 365.2425;
 const TODAY = new Date();
 
-/** 时间线标题节点的上下留白：节点与轴线端部之间留一点间隙 */
-/** 起点相同的气泡之间的上下间距，用来错开叠在一起的气泡 */
-const NODE_GAP = 10;
 /** 轴线与事件标签之间的横向距离 */
 const AXIS_GAP = 16;
 /** 轴线缩放的横向热区宽度：以轴线为中心左右各一半 */
 const AXIS_BAND = 64;
 /** 轴线热区的最小纵向高度，轴段被视野压扁时仍能抓到 */
 const AXIS_BAND_MIN = 12;
-/** 区间线段与轴线的横向偏移，落在标签连线内侧 */
-const RANGE_OFFSET = 8;
 /** 标签高度（像素）：L1 字号更大，用于遮挡判断与垂直居中 */
 const LABEL_HEIGHT: Record<1 | 2 | 3, number> = { 1: 28, 2: 25, 3: 25 };
 /** 画布上下留白，给最靠边的事件标签留出显示空间 */
@@ -117,13 +112,10 @@ function laneChain(lane: LaneId): LaneId[] {
 interface AxisEvent {
   id: number;
   day: number;
-  endDay: number | null;
   year: number;
-  endYear: number | null;
   lane: LaneId;
   lvl: 1 | 2 | 3;
   startStamp: string;
-  endStamp: string | null;
   tag: string;
   title: string;
   desc: string;
@@ -134,18 +126,14 @@ const events: AxisEvent[] = LANES.flatMap((lane) =>
     const start: Stamp = event.date
       ? parseStamp(event.date)
       : { day: utcDay(event.y, 7, 1), year: event.y, precision: "year" };
-    const end = event.end ? parseStamp(event.end) : null;
 
     return {
       id: 0,
       day: start.day,
-      endDay: end?.day ?? null,
       year: start.year,
-      endYear: end?.year ?? null,
       lane: lane.id,
       lvl: event.lvl ?? 2,
       startStamp: stampText(start),
-      endStamp: end ? stampText(end) : null,
       tag: event.tag,
       title: event.title,
       desc: event.desc,
@@ -153,12 +141,16 @@ const events: AxisEvent[] = LANES.flatMap((lane) =>
   }),
 ).map((event, id) => ({ ...event, id }));
 
-const eventDays = events.flatMap((event) =>
-  event.endDay === null ? [event.day] : [event.day, event.endDay],
-);
+const eventDays = events.map((event) => event.day);
+/** 时间线自己声明的起止也算进数据范围：区间时间线可能没有事件 */
+const laneEdgeDays = LANES.flatMap((lane) => [
+  lane.start ? parseLaneEdge(lane.start, "start") : null,
+  lane.end ? parseLaneEdge(lane.end, "end") : null,
+]).filter((day): day is number => day !== null);
 /** 数据范围：历史端留一点余量，未来端止于今天 */
-const DATA_MIN = Math.min(...eventDays) - Math.round(YEAR_DAYS * 3);
-const DATA_MAX = Math.max(...eventDays, todayDay);
+const DATA_MIN =
+  Math.min(...eventDays, ...laneEdgeDays) - Math.round(YEAR_DAYS * 3);
+const DATA_MAX = Math.max(...eventDays, ...laneEdgeDays, todayDay);
 /** 线性平移/缩放的安全边界，避免拖到数据之外的空白 */
 const SAFE_MIN = DATA_MIN - Math.round(YEAR_DAYS * 2500);
 const SAFE_MAX = DATA_MAX + Math.round(YEAR_DAYS * 2);
@@ -174,6 +166,8 @@ const lanes = reactive(
     isParent: LANES.some((other) => laneParent(other.id) === lane.id),
     start: lane.start ?? "",
     end: lane.end ?? "",
+    tag: lane.tag ?? "",
+    desc: lane.desc ?? "",
   })),
 );
 
@@ -182,6 +176,24 @@ const laneConfig = (lane: LaneId) => lanes.find((item) => item.id === lane);
 /** 时间线的当前名称：优先取页面上改过的名字 */
 const laneName = (lane: LaneId) =>
   laneConfig(lane)?.label ?? laneLabel(lane);
+
+/** 区间时间线：自带起止，本身就是一段区间，气泡上直接标出起止 */
+const isInterval = (lane: LaneId): boolean => {
+  const conf = laneConfig(lane);
+  return Boolean(conf?.start && conf.end);
+};
+
+/** 区间时间线气泡上的起止：只写年份时只显示年份，与事件标签同一套写法 */
+const laneStamp = (lane: LaneId): string => {
+  const conf = laneConfig(lane);
+  if (!conf?.start || !conf.end) return "";
+  const from = parseLaneEdge(conf.start, "start");
+  const to = parseLaneEdge(conf.end, "end");
+  if (from === null || to === null) return `${conf.start}–${conf.end}`;
+  const a = yearOf(from);
+  const b = yearOf(to);
+  return a === b ? String(a) : `${a}–${b}`;
+};
 
 /** 解析时间线起止：只写年份时起点取年初、终点取年末 */
 function parseLaneEdge(text: string, edge: "start" | "end"): number | null {
@@ -200,18 +212,32 @@ function parseLaneEdge(text: string, edge: "start" | "end"): number | null {
   return utcDay(year, month, clamp(Number(match[3]), 1, 31));
 }
 
-/** 每条时间线覆盖的事件范围：父时间线把子时间线的事件也算进来 */
+/**
+ * 每条时间线覆盖的日期范围：自身起止优先，其次取自身与子时间线的事件范围。
+ * 区间时间线没有事件，起止就是它的全部内容。
+ */
 const laneDefaults = computed<Record<LaneId, { from: number; to: number }>>(() => {
   const out = byLane(() => ({ from: DATA_MAX, to: DATA_MIN }));
   const seen: Record<LaneId, boolean> = byLane(() => false);
   for (const event of events) {
-    const end = event.endDay ?? event.day;
     // 事件同时计入自身时间线与它的各级父时间线
     for (const lane of laneChain(event.lane)) {
       const range = out[lane];
       range.from = Math.min(range.from, event.day);
-      range.to = Math.max(range.to, end);
+      range.to = Math.max(range.to, event.day);
       seen[lane] = true;
+    }
+  }
+  // 时间线自己声明的起止（区间时间线只有起止）同样计入自身与各级父级
+  for (const lane of LANES) {
+    const from = lane.start ? parseLaneEdge(lane.start, "start") : null;
+    const to = lane.end ? parseLaneEdge(lane.end, "end") : null;
+    if (from === null && to === null) continue;
+    for (const id of laneChain(lane.id)) {
+      const range = out[id];
+      if (from !== null) range.from = Math.min(range.from, from);
+      if (to !== null) range.to = Math.max(range.to, to);
+      seen[id] = true;
     }
   }
   // 没有任何事件的时间线退回整段数据范围，至少能看出轴线位置
@@ -238,11 +264,10 @@ const laneBounds = computed<Record<LaneId, { from: number; to: number }>>(() => 
   return out;
 });
 
-/** 事件是否落在时间线的起止范围内；区间事件按重叠判断 */
+/** 事件是否落在时间线的起止范围内 */
 function inLane(lane: LaneId, event: AxisEvent): boolean {
   const { from, to } = laneBounds.value[lane];
-  const end = event.endDay ?? event.day;
-  return event.day <= to && end >= from;
+  return event.day >= from && event.day <= to;
 }
 
 /** 回车即确认输入：失焦会触发 change，无需另写提交逻辑 */
@@ -904,42 +929,10 @@ const links = computed<Record<LaneId, { id: number; y: number; x1: number; x2: n
   },
 );
 
-/** 区间线段：标签被遮挡筛选隐藏时，时间跨度本身仍如实显示 */
-const ranges = computed<Record<LaneId, { id: number; x: number; y1: number; y2: number }[]>>(
-  () => {
-    const out = byLane<{ id: number; x: number; y1: number; y2: number }[]>(
-      () => [],
-    );
-
-    for (const lane of LANE_IDS) {
-      const x =
-        axisAt(lane) + (labelSide(lane) === "left" ? -RANGE_OFFSET : RANGE_OFFSET);
-      for (const event of events) {
-        if (event.lane !== lane || event.endDay === null) continue;
-        if (!inLane(lane, event)) continue;
-        out[lane].push({
-          id: event.id,
-          x,
-          y1: clipYValue(yOfDay(event.day)),
-          y2: clipYValue(yOfDay(event.endDay)),
-        });
-      }
-    }
-
-    return out;
-  },
-);
-
-/** 统一绘图区里的连线与区间：所有时间线的坐标已经落在同一套画布坐标系 */
+/** 统一绘图区里的连线：所有时间线的坐标已经落在同一套画布坐标系 */
 const allLinks = computed(() =>
   LANE_IDS.flatMap((lane) =>
     links.value[lane].map((link) => ({ ...link, lane })),
-  ),
-);
-
-const allRanges = computed(() =>
-  LANE_IDS.flatMap((lane) =>
-    ranges.value[lane].map((range) => ({ ...range, lane })),
   ),
 );
 
@@ -969,17 +962,19 @@ const totals = computed<Record<LaneId, number>>(() => {
   return out;
 });
 
+/** 气泡与轴线之间的横向距离，和事件标签一致，留给连接线 */
+const NODE_OFFSET = AXIS_GAP;
+
 /** 气泡的估算高度（收起 / 展开）、估算宽度与错开间距，只用于判断气泡是否叠在一起 */
 const NODE_HEIGHT = 30;
 const NODE_OPEN_HEIGHT = 48;
 const NODE_WIDTH_ESTIMATE = 130;
+/** 展开态气泡的宽度：要放下起止输入与说明文字 */
+const NODE_OPEN_WIDTH = 260;
 
 /** 气泡当前估算高度：展开态多了起止输入那一行 */
 const nodeHeight = (lane: LaneId): number =>
   editingLane.value === lane ? NODE_OPEN_HEIGHT : NODE_HEIGHT;
-
-/** 气泡与轴线之间的横向距离，和事件标签一致，留给连接线 */
-const NODE_OFFSET = AXIS_GAP;
 
 /** 气泡实测宽度：避让按真实宽度算，气泡之间与气泡到轴线保持同一距离 */
 const nodeWidths = reactive<Record<LaneId, number>>({});
@@ -1013,66 +1008,112 @@ function setNodeEl(lane: LaneId, el: unknown) {
   nodeObserver.observe(next);
 }
 
-/** 气泡的右边缘：默认贴在自己轴线左侧 */
+/** 气泡的右边缘：贴在自己轴线左侧 */
 const nodeRight = (lane: LaneId): number => axisAt(lane) - NODE_OFFSET;
 
+/** 左侧相邻轴线的横坐标，没有则取画布左缘 */
+function prevAxisX(lane: LaneId): number {
+  const x = axisAt(lane);
+  const prev = LANE_IDS.map((id) => axisAt(id))
+    .filter((value) => value < x - 1)
+    .sort((a, b) => b - a)[0];
+  return prev ?? 0;
+}
+
 /**
- * 气泡都骑在自己时间线的起始端上，默认贴轴左侧。
- * 起点重合的气泡会在同一高度横向上互相遮挡，此时深层时间线留在起始端，
- * 父级被连续地推到它们左侧：子轴靠近时父级气泡平滑让位，不会整格跳变。
+ * 气泡的锚点：普通时间线骑在起始端上；区间时间线骑在区间中央，
+ * 名字因此落在它那段区间的中间，读作「父轴上被标出的那一段」。
  */
-const nodeRights = computed<Record<LaneId, number>>(() => {
-  const out: Record<LaneId, number> = {};
-  const placed: { lane: LaneId; base: number; right: number; height: number }[] =
-    [];
-  // 深的先占位，同层按 LANES 顺序；让后来者（尤其是父级）往外让
-  const order = [...LANES].sort((a, b) => b.depth - a.depth);
-  for (const { id } of order) {
-    const base = yOfDay(laneBounds.value[id].from);
-    const height = nodeHeight(id);
-    let right = nodeRight(id);
-    // 只避让起点重合且高度相近的气泡，取最左的边界，位置随轴线连续变化
-    for (const other of placed) {
-      if (Math.abs(other.base - base) >= 1) continue;
-      if (Math.abs(other.height - height) >= NODE_HEIGHT) continue;
-      const limit = other.right - nodeWidth(other.lane) - AXIS_GAP;
-      if (right > limit) right = limit;
+const nodeAnchorY = (lane: LaneId): number => {
+  const { from, to } = laneBounds.value[lane];
+  return yOfDay(isInterval(lane) ? (from + to) / 2 : from);
+};
+
+/**
+ * 气泡的遮挡筛选：气泡始终贴在自己轴线左侧、骑在锚点上，不做位移。
+ * 同列气泡纵向挨得太近时只保留一个：父级优先于子级，同级保留锚点较早者。
+ * 放大后重叠消失，名字自然全部回来。
+ */
+const nodeVisible = computed<Record<LaneId, boolean>>(() => {
+  const out: Record<LaneId, boolean> = {};
+  const columns = new Map<number, LaneId[]>();
+  for (const { id } of LANES) {
+    const x = Math.round(axisAt(id));
+    columns.set(x, [...(columns.get(x) ?? []), id]);
+  }
+  const depthOf = (id: LaneId): number => laneConfig(id)?.depth ?? 0;
+  for (const ids of columns.values()) {
+    const order = [...ids].sort(
+      (a, b) => depthOf(a) - depthOf(b) || nodeAnchorY(a) - nodeAnchorY(b),
+    );
+    const kept: { y: number; h: number }[] = [];
+    for (const id of order) {
+      const y = nodeAnchorY(id);
+      const h = nodeHeight(id);
+      const clash = kept.some((other) => Math.abs(other.y - y) < (other.h + h) / 2);
+      out[id] = !clash;
+      if (!clash) kept.push({ y, h });
     }
-    out[id] = right;
-    placed.push({ lane: id, base, right, height });
   }
   return out;
 });
 
-/** 气泡在画布上的纵向中心：骑在起始端上，随轴线一起滚出画布，越界部分交给裁剪 */
+/** 气泡在画布上的纵向中心：骑在锚点上，随轴线一起滚出画布，越界部分交给裁剪 */
 function nodeCenterY(lane: LaneId): number {
-  return clipYValue(yOfDay(laneBounds.value[lane].from));
+  return clipYValue(nodeAnchorY(lane));
 }
 
 /** 气泡右边缘的画布横坐标：跟着轴线走，移出画布时交给裁剪 */
-function nodeRightX(lane: LaneId): number {
-  return nodeRights.value[lane];
+const nodeRightX = (lane: LaneId): number => nodeRight(lane);
+
+/** 气泡可用的横向空间：从本轴向左一直用到相邻轴线或画布边缘 */
+function nodeRoom(lane: LaneId): number {
+  return axisAt(lane) - prevAxisX(lane) - AXIS_GAP - 4;
 }
 
 /**
- * 标题气泡在轴线起始端左侧，垂直居中骑在起始端上；起点重合时向左错开。
- * 位置只由轴线与槽位决定，不夹取，越界部分由画布裁剪。
+ * 标题气泡垂直居中骑在起始端上，宽度不越过左侧相邻轴线：
+ * 每条时间线各占一列，气泡因此不会压到别的时间线上。
  */
 function nodeStyle(lane: LaneId): Record<string, string> {
+  // 展开态是编辑面板，要放下起止输入与说明：轴线左侧放不下就改到右侧，
+  // 面板因此不会压住轴线，也不会被挤成一条竖线
+  if (editingLane.value === lane) {
+    const room = Math.min(NODE_OPEN_WIDTH, width.value - 2 * AXIS_GAP);
+    if (nodeRoom(lane) >= room) {
+      return {
+        right: `${width.value - nodeRightX(lane)}px`,
+        top: `${nodeCenterY(lane)}px`,
+        width: `${room}px`,
+      };
+    }
+    const left = Math.min(axisAt(lane) + AXIS_GAP, width.value - room - AXIS_GAP);
+    return {
+      left: `${Math.max(AXIS_GAP, left)}px`,
+      top: `${nodeCenterY(lane)}px`,
+      width: `${room}px`,
+    };
+  }
   return {
     right: `${width.value - nodeRightX(lane)}px`,
     top: `${nodeCenterY(lane)}px`,
+    maxWidth: `${Math.max(80, nodeRoom(lane))}px`,
   };
 }
 
-/** 标题气泡与轴线的连接线：与事件标签的连线同一种画法 */
+/** 标题气泡与轴线的连接线：与事件标签的连线同一种画法，展开态改到轴线右侧 */
 const nodeLinks = computed(() =>
-  LANES.map(({ id }) => ({
-    id: id,
-    x1: nodeRightX(id),
-    x2: axisAt(id),
-    y: nodeCenterY(id),
-  })),
+  LANES.map(({ id }) => {
+    const open = editingLane.value === id && nodeRoom(id) < NODE_OPEN_WIDTH;
+    const x = axisAt(id);
+    return {
+      id,
+      x1: open ? x + AXIS_GAP : nodeRightX(id),
+      x2: x,
+      y1: nodeCenterY(id),
+      y2: nodeCenterY(id),
+    };
+  }),
 );
 
 /** 轴线热区的纵向范围：与轴线等长，只覆盖这条时间线的起止区段 */
@@ -1154,22 +1195,23 @@ function labelWidth(event: Placed): number {
   return Math.max(base, Math.min(after - axisAt(event.lane) - AXIS_GAP - 4, base + LABEL_BORROW));
 }
 
-/** 卡片与搜索使用的完整日期；区间事件给出两个端点 */
-const detailStamp = (event: AxisEvent) =>
-  event.endStamp ? `${event.startStamp}–${event.endStamp}` : event.startStamp;
+/** 标签与卡片都只写书写粒度内的日期，不补月份与日 */
+const labelStamp = (event: AxisEvent) => event.startStamp;
 
-/** 标签保持紧凑：跨年区间只写年份，同年区间不重复年份 */
-const labelStamp = (event: AxisEvent) => {
-  if (event.endYear === null) return event.startStamp;
-  return event.year === event.endYear
-    ? String(event.year)
-    : `${event.year}–${event.endYear}`;
-};
+/** 搜索结果：事件与区间时间线都能被搜到，区间时间线定位到它自己的起止 */
+interface SearchHit {
+  key: string;
+  day: number;
+  stamp: string;
+  title: string;
+  lane: LaneId;
+  event?: AxisEvent;
+}
 
-const results = computed<AxisEvent[]>(() => {
+const results = computed<SearchHit[]>(() => {
   const q = query.value.trim().toLowerCase();
   if (!q) return [];
-  return events
+  const hits: SearchHit[] = events
     // 已被时间线起止裁掉的事件搜不到，避免定位到一个不会出现的气泡
     .filter((event) => inLane(event.lane, event))
     .filter((event) =>
@@ -1179,10 +1221,38 @@ const results = computed<AxisEvent[]>(() => {
         event.desc,
         laneName(event.lane),
         labelStamp(event),
-        detailStamp(event),
       ].some((field) => field.toLowerCase().includes(q)),
     )
-    .sort((a, b) => a.day - b.day);
+    .map((event) => ({
+      key: `event-${event.id}`,
+      day: event.day,
+      stamp: labelStamp(event),
+      title: event.title,
+      lane: event.lane,
+      event,
+    }));
+
+  // 区间时间线本身就是一段区间，按名称、起止与说明参与搜索
+  for (const lane of lanes) {
+    if (!isInterval(lane.id)) continue;
+    const { from } = laneBounds.value[lane.id];
+    if (
+      ![lane.label, lane.tag, lane.desc, laneStamp(lane.id)].some((field) =>
+        field.toLowerCase().includes(q),
+      )
+    ) {
+      continue;
+    }
+    hits.push({
+      key: `lane-${lane.id}`,
+      day: from,
+      stamp: laneStamp(lane.id),
+      title: lane.label,
+      lane: lane.id,
+    });
+  }
+
+  return hits.sort((a, b) => a.day - b.day);
 });
 
 const shownResults = computed(() => results.value.slice(0, 8));
@@ -1191,7 +1261,7 @@ const searchVisible = computed(
 );
 const activeDescendant = computed(() => {
   const item = shownResults.value[activeResult.value];
-  return searchVisible.value && item ? `search-option-${item.id}` : undefined;
+  return searchVisible.value && item ? `search-option-${item.key}` : undefined;
 });
 
 watch(results, () => {
@@ -1224,23 +1294,22 @@ function onSearchKeydown(event: KeyboardEvent) {
 /** 定位时收窄到的视野（年），0 表示保持当前跨度 */
 const LOCATE_SPAN_YEARS: Record<1 | 2 | 3, number> = { 1: 0, 2: 120, 3: 30 };
 
-/** 定位到搜索结果：居中到该事件，收窄到能显示其层级的跨度，并展开卡片 */
-function locate(event: AxisEvent) {
-  const end = event.endDay ?? event.day;
-  const middle = (event.day + end) / 2;
-  const duration = Math.abs(end - event.day);
-  // 区间事件至少要让整个区间落在视野内，再叠加层级要求的跨度
-  const target = Math.max(YEAR_DAYS * LOCATE_SPAN_YEARS[event.lvl], duration);
-  if (
-    target > 0 &&
-    (visibleDays.value > target || duration > visibleDays.value)
-  ) {
+/** 定位到搜索结果：事件居中并展开卡片，区间时间线铺满它自己的起止 */
+function locate(hit: SearchHit) {
+  searchOpen.value = false;
+  if (!hit.event) {
+    fitLane(hit.lane);
+    editingLane.value = hit.lane;
+    return;
+  }
+  const event = hit.event;
+  const target = YEAR_DAYS * LOCATE_SPAN_YEARS[event.lvl];
+  if (target > 0 && visibleDays.value > target) {
     span.value = clamp(target, minSpan, maxSpan);
   }
-  centerOn(middle);
+  centerOn(event.day);
   fromSearch = true;
   selected.value = event.id;
-  searchOpen.value = false;
 }
 
 /** 卡片取代气泡出现在同一位置：排在轴线外侧，并保证整体留在画布内 */
@@ -1408,18 +1477,8 @@ onBeforeUnmount(() => {
             :style="{ stroke: laneColor(node.id) }"
             :x1="node.x1"
             :x2="node.x2"
-            :y1="node.y"
-            :y2="node.y"
-          ></line>
-          <line
-            v-for="range in allRanges"
-            :key="`range-${range.lane}-${range.id}`"
-            class="axis__range"
-            :style="{ stroke: laneColor(range.lane) }"
-            :x1="range.x"
-            :x2="range.x"
-            :y1="range.y1"
-            :y2="range.y2"
+            :y1="node.y1"
+            :y2="node.y2"
           ></line>
           <line
             v-for="link in allLinks"
@@ -1440,13 +1499,17 @@ onBeforeUnmount(() => {
         <template v-for="lane in lanes" :key="lane.id">
           <div
             class="lane-group"
-            :class="lane.isParent ? 'is-parent' : 'is-child'"
+            :class="[
+              lane.isParent ? 'is-parent' : 'is-child',
+              { 'is-interval': isInterval(lane.id) },
+            ]"
             :style="{ '--lane': lane.color }"
             :data-lane="lane.id"
           >
             <div class="axis__spine" :style="spineStyle(lane.id)"></div>
 
             <div
+              v-if="editingLane === lane.id || nodeVisible[lane.id] !== false"
               class="lane-node"
               :class="editingLane === lane.id ? 'is-open' : 'is-collapsed'"
               :style="nodeStyle(lane.id)"
@@ -1462,10 +1525,15 @@ onBeforeUnmount(() => {
                 @pointerdown="onNodePointerDown(lane.id, $event)"
                 @click="onNodeActivate(lane.id)"
               >
+                <b v-if="isInterval(lane.id)" class="lane-node__stamp">{{
+                  laneStamp(lane.id)
+                }}</b>
                 <span class="lane-node__name">{{ lane.label }}</span>
-                <span class="lane-node__count">{{ totals[lane.id] }}</span>
+                <span v-if="totals[lane.id] > 0" class="lane-node__count">{{
+                  totals[lane.id]
+                }}</span>
               </button>
-              <template v-else>
+              <template v-else-if="editingLane === lane.id">
                 <div class="lane-node__head">
                   <input
                     class="lane-node__name-input"
@@ -1512,6 +1580,10 @@ onBeforeUnmount(() => {
                     @wheel.stop
                   />
                 </div>
+                <p v-if="lane.tag || lane.desc" class="lane-node__note">
+                  <b v-if="lane.tag">{{ lane.tag }}</b>
+                  <span v-if="lane.desc">{{ lane.desc }}</span>
+                </p>
               </template>
             </div>
 
@@ -1539,7 +1611,7 @@ onBeforeUnmount(() => {
                   ×
                 </button>
                 <p class="axis-event__meta">
-                  <b>{{ detailStamp(event) }}</b> · {{ lane.label }} ·
+                  <b>{{ labelStamp(event) }}</b> · {{ lane.label }} ·
                   {{ event.tag }} · L{{ event.lvl }}
                 </p>
                 <h3 :id="`event-title-${event.id}`" class="axis-event__title">
@@ -1617,9 +1689,9 @@ onBeforeUnmount(() => {
           class="search__results"
           role="listbox"
         >
-          <li v-for="(item, index) in shownResults" :key="item.id">
+          <li v-for="(item, index) in shownResults" :key="item.key">
             <button
-              :id="`search-option-${item.id}`"
+              :id="`search-option-${item.key}`"
               class="search__result"
               :class="{ 'is-active': index === activeResult }"
               type="button"
@@ -1627,7 +1699,7 @@ onBeforeUnmount(() => {
               :aria-selected="index === activeResult"
               @click="locate(item)"
             >
-              <b>{{ detailStamp(item) }}</b>
+              <b>{{ item.stamp }}</b>
               <span class="search__title">{{ item.title }}</span>
               <span class="search__lane">{{ laneName(item.lane) }}</span>
             </button>
