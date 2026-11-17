@@ -27,17 +27,6 @@ const DAY_MS = 86_400_000;
 const YEAR_DAYS = 365.2425;
 const TODAY = new Date();
 
-type ScaleMode = "linear" | "log";
-type Unit = "day" | "month" | "year";
-
-const UNITS: Unit[] = ["day", "month", "year"];
-const UNIT_DAYS: Record<Unit, number> = {
-  day: 1,
-  month: YEAR_DAYS / 12,
-  year: YEAR_DAYS,
-};
-const UNIT_LABEL: Record<Unit, string> = { day: "天", month: "月", year: "年" };
-
 /** 时间线标题节点的上下留白：节点与轴线端部之间留一点间隙 */
 /** 起点相同的气泡之间的上下间距，用来错开叠在一起的气泡 */
 const NODE_GAP = 10;
@@ -290,11 +279,6 @@ const viewport = ref<HTMLElement | null>(null);
 /** 画布整体尺寸：所有时间线共用同一套纵向映射 */
 const width = ref(1100);
 const height = ref(560);
-const scale = ref<ScaleMode>("linear");
-/** 基准日：基准线选中的时间点，拖动基准线、输入日期或点准星都会改变它 */
-const logOrigin = ref(todayDay);
-const reversed = ref(false);
-const unit = ref<Unit>("year");
 const center = ref(0);
 const span = ref(1);
 /** 每条轴线相对父轴的横向偏移，可分别左右拖动；根轴的偏移就是画布横坐标 */
@@ -310,7 +294,6 @@ const query = ref("");
 const searchOpen = ref(false);
 const activeResult = ref(0);
 const searchWrap = ref<HTMLElement | null>(null);
-const originInput = ref<HTMLInputElement | null>(null);
 
 /** 画布右侧留给最右一条时间线标签的宽度 */
 const LABEL_GUTTER = 190;
@@ -336,15 +319,19 @@ const offsetDefault = (lane: LaneId): number =>
     ? (defaultRoots()[lane] ?? width.value / 2)
     : 0;
 
+/** 画布整体的横向平移：拖动空白处时整棵轴线树一起左右移动 */
+const panX = ref(0);
+
 /**
- * 轴线的画布横坐标：根轴直接用自己的偏移，子轴沿父级链累加。
+ * 轴线的画布横坐标：根轴取画布平移量加自己的偏移，子轴沿父级链累加。
  * LANES 是深度优先的先序序列，父轴总排在子轴之前，可以一趟算完。
  */
 const axisAbs = computed<Record<LaneId, number>>(() => {
   const out: Record<LaneId, number> = {};
   for (const { id } of LANES) {
     const parent = laneParent(id);
-    out[id] = (parent === null ? 0 : (out[parent] ?? 0)) + axisOffset[id];
+    out[id] =
+      (parent === null ? panX.value : (out[parent] ?? 0)) + axisOffset[id];
   }
   return out;
 });
@@ -364,27 +351,6 @@ const axisMargin = computed(() =>
   Math.min(120, Math.max(40, width.value * 0.04)),
 );
 
-const unitDays = computed(() => UNIT_DAYS[unit.value]);
-
-/** 屏幕方向：+1 历史在上、今天在下；-1 今天在上、历史向下 */
-const dir = computed(() => (reversed.value ? -1 : 1));
-
-/** 线性模式直接用日序号；对数以基准线为界做有符号压缩 */
-function pOf(day: number): number {
-  if (scale.value === "linear") return day;
-  const delta = day - logOrigin.value;
-  return Math.sign(delta) * Math.log1p(Math.abs(delta) / unitDays.value);
-}
-
-/** 对数坐标中 position 对应的日期偏移，用于把缩放锚点换算成新的基准日 */
-const offsetOfP = (position: number) =>
-  Math.sign(position) * unitDays.value * Math.expm1(Math.abs(position));
-
-function fromP(position: number): number {
-  if (scale.value === "linear") return position;
-  return logOrigin.value + offsetOfP(position);
-}
-
 /** 绘图区高度：整块画布都用于绘制 */
 const plotArea = computed(() => Math.max(1, height.value));
 
@@ -395,20 +361,13 @@ const plotHeight = computed(() =>
   Math.max(1, plotArea.value - plotPad.value * 2),
 );
 
-/** 基准日所在的原始高度：始终对应选中日期，随内容平移、缩放与反向移动 */
-const midRawY = computed(() => yOfDay(logOrigin.value));
-
-/** 纵向映射在整块画布里统一进行，所有时间线共用 */
-const yOfP = (position: number) =>
+/** 纵向映射在整块画布里统一进行，所有时间线共用；历史在上、今天在下 */
+const yOfDay = (day: number) =>
   plotPad.value +
-  ((dir.value * (position - center.value) + span.value / 2) / span.value) *
-    plotHeight.value;
+  ((day - center.value + span.value / 2) / span.value) * plotHeight.value;
 
-const pOfY = (y: number) =>
-  center.value +
-  dir.value * (((y - plotPad.value) / plotHeight.value - 0.5) * span.value);
-
-const yOfDay = (day: number) => yOfP(pOf(day));
+const dayOfY = (y: number) =>
+  center.value + ((y - plotPad.value) / plotHeight.value - 0.5) * span.value;
 
 /**
  * 纵向坐标的绘制边界：画布上下各留一屏，越界部分由 .axis 的 overflow 裁掉。
@@ -418,9 +377,6 @@ const yOfDay = (day: number) => yOfP(pOf(day));
 const clipYValue = (y: number): number =>
   clamp(y, -plotArea.value, plotArea.value * 2);
 
-/** 基准线的绘制高度：收进绘制边界，标题与拖动判定都用它 */
-const midY = computed(() => clipYValue(midRawY.value));
-
 /** 把一段纵向跨度夹到绘制边界内 */
 function clipY(a: number, b: number): { top: number; height: number } {
   const top = clipYValue(Math.min(a, b));
@@ -428,34 +384,15 @@ function clipY(a: number, b: number): { top: number; height: number } {
   return { top, height: Math.max(0, bottom - top) };
 }
 
-const dayOfY = (y: number) => fromP(pOfY(y));
-
-const dayStart = computed(() => fromP(center.value - span.value / 2));
-const dayEnd = computed(() => fromP(center.value + span.value / 2));
+const dayStart = computed(() => center.value - span.value / 2);
+const dayEnd = computed(() => center.value + span.value / 2);
 const visibleDays = computed(() => Math.max(1, dayEnd.value - dayStart.value));
 
-const minSpan = computed(() => (scale.value === "linear" ? 2 : 0.01));
-const maxSpan = computed(() =>
-  scale.value === "linear"
-    ? (DATA_MAX - DATA_MIN) * 2.5
-    : // 对数视野最多展开整个数据跨度
-      2 * Math.log1p((DATA_MAX - DATA_MIN) / unitDays.value),
-);
+const minSpan = 2;
+const maxSpan = (DATA_MAX - DATA_MIN) * 2.5;
 
 function clampView() {
-  span.value = clamp(span.value, minSpan.value, maxSpan.value);
-
-  if (scale.value === "log") {
-    logOrigin.value = clamp(logOrigin.value, DATA_MIN, DATA_MAX);
-    // 允许往数据两侧各多平移一个视野，避免拖成完全空白
-    const half = span.value / 2;
-    center.value = clamp(
-      center.value,
-      pOf(DATA_MIN) - half,
-      pOf(DATA_MAX) + half,
-    );
-    return;
-  }
+  span.value = clamp(span.value, minSpan, maxSpan);
 
   const half = span.value / 2;
   if (span.value >= SAFE_MAX - SAFE_MIN) {
@@ -484,20 +421,31 @@ function subtreeSpan(lane: LaneId, base = 0): { min: number; max: number } {
 /** 轴的偏移只受画布边界约束：整棵子树都留在边界内 */
 function clampAxis(lane: LaneId) {
   const parent = laneParent(lane);
-  const base = parent === null ? 0 : axisAt(parent);
+  const base = parent === null ? panX.value : axisAt(parent);
   const { min, max } = subtreeSpan(lane);
   const low = axisMargin.value - base - min;
   const high = Math.max(low, width.value - axisMargin.value - base - max);
   axisOffset[lane] = clamp(axisOffset[lane], low, high);
 }
 
+/** 画布平移的边界：至少让最左或最右一条轴线留在画布内 */
+function clampPan() {
+  const xs = LANE_IDS.map(axisAt);
+  const min = Math.min(...xs);
+  const max = Math.max(...xs);
+  const margin = axisMargin.value;
+  if (max < margin) panX.value += margin - max;
+  else if (min > width.value - margin) panX.value += width.value - margin - min;
+}
+
 function fitAll() {
-  // 全览只调整视野，保留基准线选中的时间点
-  const low = pOf(DATA_MIN);
-  const high = pOf(DATA_MAX);
-  span.value = Math.max(minSpan.value, high - low);
+  // 全览只调整视野
+  const low = DATA_MIN;
+  const high = DATA_MAX;
+  span.value = Math.max(minSpan, high - low);
   center.value = (low + high) / 2;
   // 全览同时把所有轴线放回初始偏移：根轴铺开，子轴回到父轴上
+  panX.value = 0;
   for (const lane of LANE_IDS) axisOffset[lane] = offsetDefault(lane);
   selected.value = null;
   clampView();
@@ -506,7 +454,7 @@ function fitAll() {
 /** 时间线自身区段在当前分布下的跨度，用来判断它是否已经铺满画布 */
 function laneSpan(lane: LaneId): number {
   const { from, to } = laneBounds.value[lane];
-  return Math.abs(pOf(to) - pOf(from));
+  return Math.abs(to - from);
 }
 
 /** 全览判定留出的像素容差：区段铺满画布后差几像素也算已到全览 */
@@ -519,10 +467,8 @@ const laneFitted = (lane: LaneId): boolean =>
 
 function fitLane(lane: LaneId) {
   const { from, to } = laneBounds.value[lane];
-  const low = pOf(from);
-  const high = pOf(to);
-  span.value = Math.max(minSpan.value, Math.abs(high - low));
-  center.value = (low + high) / 2;
+  span.value = Math.max(minSpan, Math.abs(to - from));
+  center.value = (from + to) / 2;
   selected.value = null;
   clampView();
 }
@@ -533,7 +479,7 @@ function fitLane(lane: LaneId) {
  */
 function onCanvasDblClick(event: MouseEvent) {
   const target = event.target as HTMLElement | null;
-  if (target?.closest("button, a, input, label, .lane-node, .axis__midline")) {
+  if (target?.closest("button, a, input, label, .lane-node")) {
     return;
   }
   // LANES 是先序序列，父轴总排在子轴之前
@@ -546,81 +492,6 @@ function onCanvasDblClick(event: MouseEvent) {
   // 命中的轴都已铺满时停在最深的子轴，重复双击不再改变视野
   const next = hits.find((id) => !laneFitted(id)) ?? hits[hits.length - 1];
   fitLane(next);
-}
-
-/** 切换坐标分布或对数单位时，保持基准日与可见跨度不变 */
-function preserveView(change: () => void) {
-  const before = dayStart.value;
-  const after = dayEnd.value;
-  change();
-  const low = pOf(before);
-  const high = pOf(after);
-  span.value = Math.max(minSpan.value, Math.abs(high - low));
-  center.value = (low + high) / 2;
-  clampView();
-}
-
-function setScale(next: ScaleMode) {
-  if (next === scale.value) return;
-  preserveView(() => {
-    scale.value = next;
-  });
-}
-
-function setUnit(next: Unit) {
-  if (next === unit.value) return;
-  preserveView(() => {
-    unit.value = next;
-  });
-}
-
-/** 选中指定日期作为基准：基准线移到该日期并居中显示 */
-function setOrigin(day: number) {
-  const next = clamp(Math.round(day), DATA_MIN, DATA_MAX);
-  if (next === Math.round(logOrigin.value)) return;
-  logOrigin.value = next;
-  center.value = pOf(next);
-  clampView();
-}
-
-const isoOf = (day: number) =>
-  `${yearOf(day)}-${pad(monthOf(day))}-${pad(dateOf(day))}`;
-
-/** 基准线上实时显示的日期，也就是当前选中的基准日 */
-const middleDay = computed(() => dayOfY(midRawY.value));
-
-/** 基准线日期始终显示在气泡与输入框里，拖动或缩放后同步更新 */
-const originText = computed(() => isoOf(Math.round(middleDay.value)));
-
-/** 解析 YYYY / YYYY-MM / YYYY-MM-DD；只写年份时取年中，与无日期的数据一致 */
-function parseDay(text: string): number | null {
-  const match = /^(\d{1,4})(?:-(\d{1,2}))?(?:-(\d{1,2}))?$/.exec(text);
-  if (!match) return null;
-  const year = Number(match[1]);
-  const month = clamp(Number(match[2] ?? 7), 1, 12);
-  const lastDay = new Date(utcDay(year, month + 1, 0) * DAY_MS).getUTCDate();
-  const day = clamp(Number(match[3] ?? 1), 1, lastDay);
-  return utcDay(year, month, day);
-}
-
-function applyOrigin(event: Event) {
-  const input = event.target as HTMLInputElement;
-  const raw = input.value.trim();
-  const day = raw ? parseDay(raw) : todayDay;
-  if (day !== null) setOrigin(day);
-  input.value = originText.value;
-}
-
-function resetOrigin() {
-  setOrigin(todayDay);
-  if (originInput.value) originInput.value.value = originText.value;
-}
-
-/** 把事件日期选为基准并居中，不切换分布 */
-function useEventOrigin(day: number) {
-  logOrigin.value = clamp(Math.round(day), DATA_MIN, DATA_MAX);
-  center.value = pOf(logOrigin.value);
-  clampView();
 }
 
 /** 指针落在哪条时间线上：优先看最近的 data-lane 容器，落在间隙时按位置就近归属 */
@@ -648,11 +519,11 @@ function localY(clientY: number): number {
 }
 
 function zoomAt(factor: number, y: number) {
-  const next = clamp(span.value / factor, minSpan.value, maxSpan.value);
+  const next = clamp(span.value / factor, minSpan, maxSpan);
   const ratio = (y - plotPad.value) / plotHeight.value;
-  // 锚点日期保持不动，基准日不变，基准线随内容移到新位置
+  // 锚点日期保持不动
   const anchorDay = dayOfY(y);
-  center.value = pOf(anchorDay) - dir.value * (ratio - 0.5) * next;
+  center.value = anchorDay - (ratio - 0.5) * next;
   span.value = next;
   clampView();
 }
@@ -673,16 +544,15 @@ function onCanvasWheel(event: WheelEvent) {
   event.preventDefault();
   const scaleBy =
     event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? plotHeight.value : 1;
-  const shift =
-    dir.value * ((event.deltaY * scaleBy) / plotHeight.value) * span.value;
+  const shift = (event.deltaY * scaleBy * span.value) / plotHeight.value;
 
   center.value += shift;
   clampView();
 }
 
-/** 只把视野移到指定日期，不改变基准线选中的时间点 */
+/** 只把视野移到指定日期 */
 function centerOn(day: number) {
-  center.value = pOf(day);
+  center.value = day;
   clampView();
   selected.value = null;
 }
@@ -692,16 +562,17 @@ let drag: {
   y: number;
   top: number;
   center: number;
-  origin: number;
   span: number;
   lane: LaneId;
   /** 手势开始时那条轴的偏移，拖动按起点偏移累加 */
   offset: number;
+  /** 手势开始时画布的整体平移量 */
+  pan: number;
   /** 手势是否起于轴线热区：只有轴上横向拖动才移动轴线 */
   canAxis: boolean;
   /** 手势是否起于标题气泡：气泡只用来拖轴，纵向拖动不改时间 */
   fromNode: boolean;
-  mode: "axis" | "time" | "mid" | "none" | null;
+  mode: "axis" | "pan" | "time" | "none" | null;
 } | null = null;
 let moved = false;
 
@@ -712,8 +583,10 @@ function onPointerMove(event: PointerEvent) {
   const dy = event.clientY - drag.y;
 
   if (drag.mode === null && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) {
-    // 横向手势在轴段热区或标题气泡上拖轴，其余横向手势不移动任何东西
-    if (Math.abs(dx) > Math.abs(dy)) drag.mode = drag.canAxis ? "axis" : "none";
+    // 横向手势在轴段热区或标题气泡上拖轴，其余横向手势平移整块画布
+    if (Math.abs(dx) > Math.abs(dy)) {
+      drag.mode = drag.canAxis ? "axis" : "pan";
+    }
     // 起于气泡的纵向手势不做任何事，避免拖标题时误平移时间
     else drag.mode = drag.fromNode ? "none" : "time";
   }
@@ -724,28 +597,13 @@ function onPointerMove(event: PointerEvent) {
     // 只改指针所在那条轴的偏移：子轴移动时它自己的子轴跟着走，父轴不动
     axisOffset[drag.lane] = drag.offset + dx;
     clampAxis(drag.lane);
-  } else if (drag.mode === "mid") {
-    // 基准线搬到指针处并选中该日期：按拖拽起点的布局换算，避免逐帧叠加失真
-    const ratio = clamp(
-      (event.clientY - drag.top - plotPad.value) /
-        plotHeight.value,
-      0.05,
-      0.95,
-    );
-    const position = drag.center + dir.value * (ratio - 0.5) * drag.span;
-    const day =
-      scale.value === "log"
-        ? drag.origin + offsetOfP(position)
-        : position;
-    logOrigin.value = clamp(Math.round(day), DATA_MIN, DATA_MAX);
-    // 让基准线正好落在指针高度上
-    center.value =
-      pOf(logOrigin.value) - dir.value * (ratio - 0.5) * span.value;
-    clampView();
+  } else if (drag.mode === "pan") {
+    // 平移整块画布：所有轴线一起左右移动，相对位置不变
+    panX.value = drag.pan + dx;
+    clampPan();
   } else {
-    // 平移时间：只移动视野，基准线随选中的日期一起移动
-    center.value =
-      drag.center - dir.value * (dy / plotHeight.value) * span.value;
+    // 平移时间：只移动视野
+    center.value = drag.center - (dy / plotHeight.value) * span.value;
     clampView();
   }
 }
@@ -766,27 +624,21 @@ function onPointerDown(event: PointerEvent) {
   if (target?.closest("button, a, input, label, .lane-node")) return;
   // 指针落在哪条时间线上，就只拖动那条线的轴线
   const lane = laneAt(target, event.clientX, event.clientY);
-  const top = viewport.value?.getBoundingClientRect().top ?? 0;
-
-  // 基准线在两种分布下都可抓取：气泡本身或线上下几条像素
-  const onMidline =
-    Boolean(target?.closest(".axis__midline")) ||
-    Math.abs(event.clientY - top - midY.value) <= 8;
 
   selected.value = null;
   drag = {
     x: event.clientX,
     y: event.clientY,
-    top,
+    top: viewport.value?.getBoundingClientRect().top ?? 0,
     center: center.value,
-    origin: logOrigin.value,
     span: span.value,
     lane,
     offset: axisOffset[lane],
-    // 轴线只在自身区段内可拖，其余位置横拖不再移动轴线
+    pan: panX.value,
+    // 轴线只在自身区段内可拖，其余位置横拖平移整块画布
     canAxis: inAxisBand(lane, event.clientX, event.clientY),
     fromNode: false,
-    mode: onMidline ? "mid" : null,
+    mode: null,
   };
   dragging.value = true;
   window.addEventListener("pointermove", onPointerMove);
@@ -812,10 +664,10 @@ function onNodePointerDown(lane: LaneId, event: PointerEvent) {
     y: event.clientY,
     top: viewport.value?.getBoundingClientRect().top ?? 0,
     center: center.value,
-    origin: logOrigin.value,
     span: span.value,
     lane,
     offset: axisOffset[lane],
+    pan: panX.value,
     canAxis: true,
     fromNode: true,
     // 与画布手势一致：超过阈值才判定为拖动，避免抖动吞掉点击
@@ -916,9 +768,7 @@ const ticks = computed<Tick[]>(() => {
 
   if (days > YEAR_DAYS * 3) {
     const spanYears = days / YEAR_DAYS;
-    // 对数轴按固定时间步长生成刻度，让虚线的疏密直接体现时间被压缩的程度
-    const rawStep =
-      scale.value === "log" ? Math.max(1, spanYears / 300) : (spanYears * 64) / px;
+    const rawStep = (spanYears * 64) / px;
     const step =
       [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000].find(
         (candidate) => candidate >= rawStep,
@@ -974,8 +824,8 @@ const ticks = computed<Tick[]>(() => {
   let lastLabelY = Number.NEGATIVE_INFINITY;
   for (const tick of raw) {
     // 越界刻度交给 .axis 的 overflow 裁剪，不在接近边缘时提前卸载
-    const y = yOfP(pOf(tick.day));
-    // 虚线全部保留，密度如实反映对数轴的时间压缩；只对重叠文字做筛选
+    const y = yOfDay(tick.day);
+    // 虚线全部保留，只对重叠文字做筛选
     const showLabel = Math.abs(y - lastLabelY) >= MIN_TICK_LABEL_GAP;
     if (showLabel) lastLabelY = y;
     kept.push({ ...tick, y, showLabel });
@@ -1357,15 +1207,7 @@ function locate(event: AxisEvent) {
     target > 0 &&
     (visibleDays.value > target || duration > visibleDays.value)
   ) {
-    span.value = clamp(
-      scale.value === "linear"
-        ? target
-        : scale.value === "log"
-          ? 2 * Math.log1p(target / 2 / unitDays.value)
-          : Math.abs(pOf(middle + target / 2) - pOf(middle - target / 2)),
-      minSpan.value,
-      maxSpan.value,
-    );
+    span.value = clamp(target, minSpan, maxSpan);
   }
   centerOn(middle);
   fromSearch = true;
@@ -1461,16 +1303,20 @@ let observer: ResizeObserver | undefined;
 function syncSize() {
   const el = viewport.value;
   if (!el) return;
-  const wasDefault = LANE_IDS.every(
-    (lane) => Math.abs(axisOffset[lane] - offsetDefault(lane)) < 2,
-  );
+  const wasDefault =
+    Math.abs(panX.value) < 2 &&
+    LANE_IDS.every(
+      (lane) => Math.abs(axisOffset[lane] - offsetDefault(lane)) < 2,
+    );
   width.value = Math.max(320, el.clientWidth);
   height.value = Math.max(120, el.clientHeight);
   // 尺寸变化后轴线仍停在初始位置时，跟着新的画布宽度重新对齐
   if (wasDefault) {
+    panX.value = 0;
     for (const lane of LANE_IDS) axisOffset[lane] = offsetDefault(lane);
   }
   for (const lane of LANE_IDS) clampAxis(lane);
+  clampPan();
 }
 
 onMounted(() => {
@@ -1558,21 +1404,8 @@ onBeforeUnmount(() => {
           ></line>
         </svg>
 
-        <div
-          class="axis__today"
-          :class="{ 'is-lifted': Math.abs(todayY - midY) < 24 }"
-          :style="{ top: `${todayY}px` }"
-        >
+        <div class="axis__today" :style="{ top: `${todayY}px` }">
           <span>今天</span>
-        </div>
-
-        <div class="axis__midline" :style="{ top: `${midY}px` }">
-          <span
-            title="上下拖动基准线，选中指针处的日期"
-            @wheel.prevent.stop="onAxisWheel"
-          >
-            基准 {{ originText }}
-          </span>
         </div>
 
         <template v-for="lane in lanes" :key="lane.id">
@@ -1674,19 +1507,6 @@ onBeforeUnmount(() => {
                   @click.stop="closeCard"
                 >
                   ×
-                </button>
-                <button
-                  class="axis-event__origin"
-                  :class="{ 'is-on': Math.abs(event.day - logOrigin) < 0.5 }"
-                  type="button"
-                  aria-label="把该事件移到基准线作为对数基准"
-                  title="把该事件移到基准线作为对数基准"
-                  @click.stop="useEventOrigin(event.day)"
-                >
-                  <svg viewBox="0 0 16 16" aria-hidden="true">
-                    <circle cx="8" cy="8" r="3.2"></circle>
-                    <path d="M8 1v2.6M8 12.4V15M1 8h2.6M12.4 8H15"></path>
-                  </svg>
                 </button>
                 <p class="axis-event__meta">
                   <b>{{ detailStamp(event) }}</b> · {{ lane.label }} ·
@@ -1796,91 +1616,6 @@ onBeforeUnmount(() => {
       <span class="toolbar__spacer"></span>
       <button class="btn" type="button" @click="fitAll">全览</button>
       <button class="btn" type="button" @click="centerOn(todayDay)">今天</button>
-      <div class="seg" role="group" aria-label="刻度分布">
-        <button
-          type="button"
-          :class="{ 'is-on': scale === 'linear' }"
-          @click="setScale('linear')"
-        >
-          线性
-        </button>
-        <button
-          type="button"
-          :class="{ 'is-on': scale === 'log' }"
-          @click="setScale('log')"
-        >
-          对数
-        </button>
-      </div>
-      <div
-        class="seg"
-        role="group"
-        aria-label="时间方向"
-        :title="reversed ? '反向：今天在上，历史向下' : '正向：历史在上，今天在下'"
-      >
-        <button
-          type="button"
-          :class="{ 'is-on': !reversed }"
-          @click="reversed = false"
-        >
-          正向
-        </button>
-        <button
-          type="button"
-          :class="{ 'is-on': reversed }"
-          @click="reversed = true"
-        >
-          反向
-        </button>
-      </div>
-      <div
-        v-if="scale === 'log'"
-        class="seg"
-        role="group"
-        aria-label="对数单位"
-        title="对数单位决定靠近基准处被拉开的程度"
-      >
-        <button
-          v-for="item in UNITS"
-          :key="item"
-          type="button"
-          :class="{ 'is-on': unit === item }"
-          @click="setUnit(item)"
-        >
-          {{ UNIT_LABEL[item] }}
-        </button>
-      </div>
-      <div
-        v-if="scale === 'log'"
-        class="origin"
-        title="对数基准：始终取基准线选中的日期，越靠近基准线越舒展；拖动基准线选点，或直接输入日期"
-      >
-        <label class="origin__label" for="log-origin">基准</label>
-        <input
-          id="log-origin"
-          ref="originInput"
-          class="origin__input"
-          type="text"
-          inputmode="numeric"
-          autocomplete="off"
-          spellcheck="false"
-          placeholder="今天"
-          aria-label="对数基准，输入 YYYY 或 YYYY-MM-DD，留空回到今天"
-          :value="originText"
-          @change="applyOrigin"
-          @keydown.enter.prevent="applyOrigin"
-        />
-        <button
-          v-if="Math.round(logOrigin) !== todayDay"
-          class="origin__reset"
-          type="button"
-          aria-label="对数基准回到今天"
-          title="基准回到今天"
-          @click="resetOrigin"
-        >
-          ↺
-        </button>
-      </div>
     </div>
   </section>
 </template>

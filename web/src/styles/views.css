@@ -600,11 +600,10 @@ body {
   stroke-dasharray: 3 3;
 }
 
-/* 抓取中的手型覆盖所有可拖区域，包括基准线气泡与标题气泡 */
+/* 抓取中的手型覆盖所有可拖区域，包括标题气泡 */
 .axis.is-dragging,
 .axis.is-dragging .axis__band,
-.axis.is-dragging .lane-node__bubble,
-.axis.is-dragging .axis__midline span { cursor: grabbing; }
+.axis.is-dragging .lane-node__bubble { cursor: grabbing; }
 
 /* 轴线覆盖且只覆盖这条时间线的起止区段，两端实心结束、不做渐变 */
 .axis__spine {
@@ -684,33 +683,6 @@ body {
   color: var(--gold);
   white-space: nowrap;
 }
-/* 与基准线气泡重合时上移，避免两个日期气泡叠在一起 */
-.axis__today.is-lifted span { transform: translateY(-150%); }
-.axis__midline {
-  position: absolute;
-  left: 0;
-  right: 0;
-  border-top: 1px dashed rgb(var(--shadow-rgb) / 0.32);
-  z-index: 0;
-  pointer-events: none;
-}
-.axis__midline span {
-  position: absolute;
-  right: 14px;
-  top: 0;
-  transform: translateY(-50%);
-  padding: 1px 8px;
-  border: 1px solid rgb(var(--shadow-rgb) / 0.22);
-  border-radius: 999px;
-  background: var(--surface);
-  font-family: var(--mono);
-  font-size: 0.6rem;
-  letter-spacing: 0.08em;
-  color: var(--ink-2);
-  white-space: nowrap;
-  pointer-events: auto;
-  cursor: grab;
-}
 
 .axis__links {
   position: absolute;
@@ -718,7 +690,8 @@ body {
   z-index: 2;
   overflow: visible;
   pointer-events: none;
-}.axis__links line { stroke-width: 1; }
+}
+.axis__links line { stroke-width: 1; }
 .axis__links line { stroke: var(--lane); stroke-opacity: 0.3; }
 .axis__links line.axis__range {
   stroke-width: 4;
@@ -832,8 +805,7 @@ body {
   line-height: 1.75;
   color: var(--ink-2);
 }
-.axis-event__close,
-.axis-event__origin {
+.axis-event__close {
   position: absolute;
   top: 6px;
   width: 22px;
@@ -851,24 +823,10 @@ body {
   cursor: pointer;
 }
 .axis-event__close { right: 6px; }
-.axis-event__origin { right: 32px; }
-.axis-event__close:hover,
-.axis-event__origin:hover {
+.axis-event__close:hover {
   border-color: var(--line);
   background: var(--surface-2);
   color: var(--ink);
-}
-.axis-event__origin.is-on {
-  border-color: var(--line);
-  color: var(--gold);
-}
-.axis-event__origin svg {
-  width: 13px;
-  height: 13px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.4;
-  stroke-linecap: round;
 }
 @keyframes card-in {
   from { opacity: 0; }
@@ -927,78 +885,6 @@ body {
 .axis__readout.is-right::after { right: 100%; }
 .axis__readout.is-left::after { left: 100%; }
 
-
-.seg {
-  display: inline-flex;
-  padding: 2px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: rgb(var(--surface-rgb) / 0.7);
-}
-.seg button {
-  font: inherit;
-  font-size: 0.72rem;
-  padding: 3px 10px;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  color: var(--ink-3);
-  cursor: pointer;
-  transition: background 0.2s, color 0.2s;
-}
-.seg button:hover { color: var(--ink); }
-.seg button.is-on {
-  background: var(--ink);
-  color: var(--on-ink);
-}
-.origin {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 2px 4px 2px 10px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: rgb(var(--surface-rgb) / 0.7);
-  transition: border-color 0.2s, background 0.2s;
-}
-.origin:focus-within {
-  border-color: var(--line-hover);
-  background: var(--surface-2);
-}
-.origin__label {
-  font-size: 0.72rem;
-  color: var(--ink-3);
-}
-.origin__input {
-  width: 84px;
-  padding: 2px 0;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: var(--ink);
-  font-family: var(--mono);
-  font-size: 0.7rem;
-}
-.origin__input::placeholder { color: var(--ink-3); }
-.origin__reset {
-  width: 18px;
-  height: 18px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--ink-3);
-  font: inherit;
-  font-size: 0.78rem;
-  line-height: 1;
-  cursor: pointer;
-}
-.origin__reset:hover {
-  background: var(--surface-2);
-  color: var(--ink);
-}
 
 .to-top {
   position: fixed;
