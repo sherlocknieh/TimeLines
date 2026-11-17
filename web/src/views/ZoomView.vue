@@ -1019,27 +1019,19 @@ const nodeSlots = computed<Record<LaneId, number>>(() => {
   return out;
 });
 
-/** 气泡的估算宽度：展开态要宽一些，只用于贴边时收住位置 */
-const nodeWidthEstimate = (lane: LaneId): number =>
-  editingLane.value === lane ? 200 : NODE_WIDTH_ESTIMATE;
-
 /** 气泡在画布上的纵向中心：骑在起始端上，随轴线一起滚出画布，越界部分交给裁剪 */
 function nodeCenterY(lane: LaneId): number {
   return clipYValue(yOfDay(laneBounds.value[lane].from));
 }
 
-/** 气泡右边缘的画布横坐标：横向让位后仍要留在画布内 */
+/** 气泡右边缘的画布横坐标：跟着轴线走，移出画布时交给裁剪 */
 function nodeRightX(lane: LaneId): number {
-  return clamp(
-    nodeRight(lane, nodeSlots.value[lane]),
-    6,
-    Math.max(6, width.value - 6 - nodeWidthEstimate(lane)),
-  );
+  return nodeRight(lane, nodeSlots.value[lane]);
 }
 
 /**
  * 标题气泡在轴线起始端左侧，垂直居中骑在起始端上；起点重合时向左错开。
- * 展开时气泡向左生长，估算宽度只用来防止贴边溢出画布。
+ * 位置只由轴线与槽位决定，不夹取，越界部分由画布裁剪。
  */
 function nodeStyle(lane: LaneId): Record<string, string> {
   return {
