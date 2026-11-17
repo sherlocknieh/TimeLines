@@ -1023,14 +1023,9 @@ const nodeSlots = computed<Record<LaneId, number>>(() => {
 const nodeWidthEstimate = (lane: LaneId): number =>
   editingLane.value === lane ? 200 : NODE_WIDTH_ESTIMATE;
 
-/** 气泡在画布上的纵向中心：起始端太靠边时夹在画布内 */
+/** 气泡在画布上的纵向中心：骑在起始端上，随轴线一起滚出画布，越界部分交给裁剪 */
 function nodeCenterY(lane: LaneId): number {
-  const half = nodeHeight(lane) / 2;
-  return clamp(
-    yOfDay(laneBounds.value[lane].from),
-    half + 4,
-    Math.max(half + 4, plotArea.value - half - 4),
-  );
+  return clipYValue(yOfDay(laneBounds.value[lane].from));
 }
 
 /** 气泡右边缘的画布横坐标：横向让位后仍要留在画布内 */
