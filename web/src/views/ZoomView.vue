@@ -44,6 +44,8 @@ const LABEL_HEIGHT: Record<1 | 2 | 3, number> = { 1: 28, 2: 25, 3: 25 };
 const PLOT_PAD = 96;
 /** 刻度文字气泡高度约 20px，留一点间隙即可：只要不重叠就随虚线显示 */
 const MIN_TICK_LABEL_GAP = 22;
+/** 标准视图里每年占用的行高：每年刚好一行 */
+const YEAR_ROW = 32;
 /** 事件卡片的尺寸约束，展开后仍要留在画布内 */
 const CARD_MAX_WIDTH = 320;
 const CARD_MIN_WIDTH = 160;
@@ -451,6 +453,19 @@ function fitAll() {
   clampView();
 }
 
+/** 标准视图：每年固定占一行，顶端对齐到整数年，纵横都对得上刻度 */
+function standardView() {
+  span.value = clamp((plotHeight.value / YEAR_ROW) * YEAR_DAYS, minSpan, maxSpan);
+  const half = span.value / 2;
+  // 顶端年取当前视野所在年，并把结果夹在可停放范围内，重复点击不再漂移
+  const low = Math.ceil(yearOf(SAFE_MIN) + 1);
+  const high = Math.floor(yearOf(SAFE_MAX) - 1);
+  const topYear = clamp(Math.round(yearOf(center.value - half)), low, high);
+  center.value = utcDay(topYear) + half;
+  selected.value = null;
+  clampView();
+}
+
 /** 时间线自身区段在当前分布下的跨度，用来判断它是否已经铺满画布 */
 function laneSpan(lane: LaneId): number {
   const { from, to } = laneBounds.value[lane];
@@ -768,7 +783,8 @@ const ticks = computed<Tick[]>(() => {
 
   if (days > YEAR_DAYS * 3) {
     const spanYears = days / YEAR_DAYS;
-    const rawStep = (spanYears * 64) / px;
+    // 每 26px 至少一个年份刻度：标准视图每年一行时正好逐年标注
+    const rawStep = (spanYears * 26) / px;
     const step =
       [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000].find(
         (candidate) => candidate >= rawStep,
@@ -1615,6 +1631,7 @@ onBeforeUnmount(() => {
       </div>
       <span class="toolbar__spacer"></span>
       <button class="btn" type="button" @click="fitAll">全览</button>
+      <button class="btn" type="button" @click="standardView">标准</button>
       <button class="btn" type="button" @click="centerOn(todayDay)">今天</button>
     </div>
   </section>
